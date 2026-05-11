@@ -1,9 +1,9 @@
-"""MCP server that exposes DeepSeek API as a tool for Claude Code.
+"""MCP server that exposes OpenAI Chat Completions as a tool for Claude Code.
 
 Usage:
-    DEEPSEEK_API_KEY=sk-xxx python scripts/mcp_deepseek.py
+    OPENAI_API_KEY=sk-xxx python scripts/mcp_openai.py
 
-Reads DEEPSEEK_API_KEY from environment or .env file. Never hardcode.
+Reads OPENAI_API_KEY from environment or .env file. Never hardcode.
 """
 
 import json
@@ -23,39 +23,46 @@ if os.path.exists(_env_path):
                 k, _, v = line.partition("=")
                 os.environ.setdefault(k.strip(), v.strip())
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-_raw_base = os.environ.get("DEEPSEEK_API_BASE", os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"))
-DEEPSEEK_BASE_URL = _raw_base.rstrip("/").removesuffix("/v1")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+_raw_base = os.environ.get("OPENAI_API_BASE", os.environ.get("OPENAI_BASE_URL", "https://api.openai.com"))
+OPENAI_BASE_URL = _raw_base.rstrip("/").removesuffix("/v1")
+DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.5")
 
 
-def _call_deepseek(
+def _call_openai(
     prompt: str,
-    model: str = "deepseek-reasoner",
+    model: str = "",
     system: str = "",
     temperature: float = 0.7,
     max_tokens: int = 8192,
 ) -> dict[str, Any]:
-    if not DEEPSEEK_API_KEY:
-        return {"error": "DEEPSEEK_API_KEY not set in environment"}
+    model = model or DEFAULT_MODEL
+    if not OPENAI_API_KEY:
+        return {"error": "OPENAI_API_KEY not set in environment"}
 
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "max_completion_tokens": max_tokens,
+    }
+    # GPT-5 family only accepts temperature=1 (the default). Omit unless user
+    # is explicitly targeting a non-GPT-5 model.
+    if not model.lower().startswith("gpt-5"):
+        payload["temperature"] = temperature
+
     try:
         resp = httpx.post(
-            f"{DEEPSEEK_BASE_URL}/v1/chat/completions",
+            f"{OPENAI_BASE_URL}/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
+            json=payload,
             timeout=120,
         )
         resp.raise_for_status()
@@ -78,11 +85,11 @@ def _call_deepseek(
 
 TOOLS = [
     {
-        "name": "ask_deepseek",
+        "name": "ask_openai",
         "description": (
-            "Send a prompt to DeepSeek LLM. "
-            "Use for: Chinese financial reasoning, factor expression generation, "
-            "alternative perspectives, or tasks benefiting from DeepSeek Reasoner's chain-of-thought. "
+            "Send a prompt to OpenAI's GPT models. "
+            "Use for: independent cross-review of factor research conclusions, "
+            "alternative perspectives, or general LLM reasoning. "
             "Returns the model's response and optionally its reasoning trace."
         ),
         "inputSchema": {
@@ -90,12 +97,12 @@ TOOLS = [
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "The user prompt to send to DeepSeek",
+                    "description": "The user prompt to send to OpenAI",
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model name: 'deepseek-reasoner' (R1, default) or 'deepseek-chat' (V3)",
-                    "default": "deepseek-reasoner",
+                    "description": "Model name (e.g. 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5-mini'). Defaults to OPENAI_MODEL env var.",
+                    "default": "",
                 },
                 "system": {
                     "type": "string",
@@ -130,7 +137,7 @@ def _handle_request(req: dict) -> dict | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "deepseek-mcp", "version": "1.0.0"},
+                "serverInfo": {"name": "openai-mcp", "version": "1.0.0"},
             },
         }
 
@@ -145,10 +152,10 @@ def _handle_request(req: dict) -> dict | None:
         tool_name = params.get("name", "")
         args = params.get("arguments", {})
 
-        if tool_name == "ask_deepseek":
-            result = _call_deepseek(
+        if tool_name == "ask_openai":
+            result = _call_openai(
                 prompt=args.get("prompt", ""),
-                model=args.get("model", "deepseek-reasoner"),
+                model=args.get("model", ""),
                 system=args.get("system", ""),
                 temperature=args.get("temperature", 0.7),
                 max_tokens=args.get("max_tokens", 8192),
