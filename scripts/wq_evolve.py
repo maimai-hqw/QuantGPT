@@ -107,6 +107,9 @@ WQ_SYSTEM_PROMPT = """你是 WorldQuant BRAIN 因子专家。生成的表达式�
 - sign_power（必须写 signed_power）
 - product（必须写 ts_product）
 - where（必须写 if_else）
+- **ts_shift, ts_min, ts_max, ts_ir, ts_skewness, ts_cov（用户 WQ 账号权限拒绝）**
+  - 需要 lag 时用 ts_delta(x, N) / x 替代（不要 ts_shift）
+  - 需要极值时用 ts_argmax/ts_argmin 或 ts_rank 比较替代
 
 ## ✅ 允许的变量（仅这些）
 价量: open, high, low, close, volume, vwap, returns
