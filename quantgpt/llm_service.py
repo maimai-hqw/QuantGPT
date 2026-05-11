@@ -1,4 +1,4 @@
-"""LLM integration — DeepSeek API calls for factor expression generation and interpretation."""
+"""LLM integration — OpenAI API calls for factor expression generation and interpretation."""
 
 import json
 import logging
@@ -210,19 +210,21 @@ def validate_parentheses(expr: str) -> str | None:
 
 def _get_client():
     from openai import OpenAI
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    return OpenAI(api_key=api_key, base_url=base_url)
+
+    from .llm_config import get_llm_config
+    cfg = get_llm_config()
+    if not cfg["api_key"]:
+        raise RuntimeError("LLM_API_KEY (or OPENAI_API_KEY fallback) is not set")
+    return OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
 
 
 def _get_model() -> str:
-    return os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    from .llm_config import get_llm_config
+    return get_llm_config()["model"]
 
 
-def call_deepseek(prompt: str) -> str:
-    """Call DeepSeek API to generate factor expression."""
+def call_openai(prompt: str) -> str:
+    """Call OpenAI API to generate factor expression."""
     client = _get_client()
     operators_doc = _expr_module_doc or _FACTOR_OPERATORS
     system = _SYSTEM_PROMPT.format(operators=operators_doc)
@@ -233,8 +235,7 @@ def call_deepseek(prompt: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.1,
-        max_tokens=256,
+        max_completion_tokens=256,
         timeout=30,
     )
     return clean_expression(resp.choices[0].message.content)
@@ -263,8 +264,7 @@ def call_fix_expression(expression: str, error: str, prompt: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.1,
-        max_tokens=256,
+        max_completion_tokens=256,
         timeout=30,
     )
     return clean_expression(resp.choices[0].message.content)
@@ -300,8 +300,8 @@ def call_interpret_factor(
     backtest_summary: dict,
 ) -> dict:
     """Call LLM to interpret factor economic meaning."""
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-    if not api_key:
+    from .llm_config import get_llm_config
+    if not get_llm_config()["api_key"]:
         return {}
 
     try:
@@ -332,8 +332,7 @@ def call_interpret_factor(
                 {"role": "system", "content": _INTERPRET_SYSTEM},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.3,
-            max_tokens=600,
+            max_completion_tokens=600,
             timeout=30,
         )
         raw = resp.choices[0].message.content.strip()

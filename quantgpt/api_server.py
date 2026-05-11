@@ -15,7 +15,7 @@ Endpoints:
     GET  /api/v1/auth/me                 — 当前用户信息
     GET  /api/v1/health                  — 健康检查
 
-启动: DEEPSEEK_API_KEY=sk-xxx python -m quantgpt --transport http --port 8003
+启动: OPENAI_API_KEY=sk-xxx python -m quantgpt --transport http --port 8003
 """
 
 import asyncio

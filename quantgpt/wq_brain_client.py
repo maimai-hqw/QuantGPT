@@ -26,7 +26,7 @@ SUBMIT_THRESHOLDS = {
 }
 
 _POLL_INTERVAL = 10
-_POLL_MAX_ATTEMPTS = 36
+_POLL_MAX_ATTEMPTS = 72
 _CONCURRENT_BACKOFF = 30
 _MAX_RETRIES = 5
 
@@ -240,7 +240,7 @@ class WQBrainClient:
 
             time.sleep(_POLL_INTERVAL)
 
-        return {"ok": False, "error": "WQ simulation polling timeout (6min)"}
+        return {"ok": False, "error": "WQ simulation polling timeout (12min)"}
 
     def _fetch_alpha(self, alpha_id: str) -> dict:
         r = self._get_session().get(f"{API_BASE}/alphas/{alpha_id}")
@@ -251,6 +251,46 @@ class WQBrainClient:
                 logger.warning(f"Empty/invalid JSON from /alphas/{alpha_id}")
                 return {}
         return {}
+
+    def update_alpha_metadata(
+        self,
+        alpha_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict:
+        """PATCH alpha metadata (name / description / tags) on WQ BRAIN.
+
+        Only provided fields are included in the payload. Returns
+        {"ok": bool, "alpha_id": str, "status_code": int, "error": str?}.
+        """
+        payload: dict = {}
+        if name is not None:
+            payload["name"] = name
+        if tags is not None:
+            payload["tags"] = tags
+        # NOTE: WQ BRAIN API rejects "description" with HTTP 400
+        # ("Unexpected property"). Accept the arg silently for forward-compat
+        # but do not send it. Use comment / regular field if needed.
+        _ = description
+        if not payload:
+            return {"ok": True, "alpha_id": alpha_id, "noop": True}
+
+        s = self._get_session()
+        url = f"{API_BASE}/alphas/{alpha_id}"
+        try:
+            r = s.patch(url, json=payload)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            return {"ok": False, "alpha_id": alpha_id, "error": f"network: {e}"}
+
+        if r.status_code in (200, 201, 204):
+            return {"ok": True, "alpha_id": alpha_id, "status_code": r.status_code}
+        return {
+            "ok": False,
+            "alpha_id": alpha_id,
+            "status_code": r.status_code,
+            "error": (r.text or "")[:300],
+        }
 
     def check_alpha_status(self, alpha_id: str) -> dict:
         """Fetch actual platform-side alpha status including submission state."""

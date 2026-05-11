@@ -119,7 +119,7 @@ def _run_strategy_backtest_task(
     try:
         # ---- Phase 1: Generate strategy code via LLM ----
         task["status"] = "generating_code"
-        code = _call_deepseek_strategy(req.prompt)
+        code = _call_openai_strategy(req.prompt)
         task["strategy_code"] = code
 
         # ---- Phase 2: Validate code (AST) ----
@@ -230,13 +230,15 @@ def _run_strategy_backtest_task(
 def _get_strategy_llm_config() -> dict:
     """Get LLM config for strategy generation.
 
-    Priority: STRATEGY_LLM_* > DEEPSEEK_*.
+    Priority: STRATEGY_LLM_* > OPENAI_*.
     Returns dict with keys: api_key, base_url, model, provider ('anthropic' or 'openai').
     """
+    from ..llm_config import get_llm_config
+    _cfg = get_llm_config()
     provider = os.environ.get("STRATEGY_LLM_PROVIDER", "").lower()
-    api_key = os.environ.get("STRATEGY_LLM_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
-    base_url = os.environ.get("STRATEGY_LLM_BASE_URL") or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.environ.get("STRATEGY_LLM_MODEL") or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    api_key = os.environ.get("STRATEGY_LLM_API_KEY") or _cfg["api_key"]
+    base_url = os.environ.get("STRATEGY_LLM_BASE_URL") or _cfg["base_url"]
+    model = os.environ.get("STRATEGY_LLM_MODEL") or _cfg["model"]
 
     # Auto-detect provider from model name
     if not provider:
@@ -246,11 +248,11 @@ def _get_strategy_llm_config() -> dict:
             provider = "openai"
 
     if not api_key:
-        raise ValueError("STRATEGY_LLM_API_KEY 或 DEEPSEEK_API_KEY 未配置")
+        raise ValueError("STRATEGY_LLM_API_KEY 或 OPENAI_API_KEY 未配置")
     return {"api_key": api_key, "base_url": base_url, "model": model, "provider": provider}
 
 
-def _call_deepseek_strategy(prompt: str, max_retries: int = 2) -> str:
+def _call_openai_strategy(prompt: str, max_retries: int = 2) -> str:
     """Call LLM to generate strategy code from natural language."""
     from ..strategy_code_utils import extract_python_code
     from ..strategy_prompt import STRATEGY_SYSTEM_PROMPT
@@ -290,8 +292,7 @@ def _call_openai(cfg: dict, system_prompt: str, user_prompt: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.3,
-        max_tokens=4096,
+        max_completion_tokens=4096,
         timeout=120,
     )
     return resp.choices[0].message.content or ""
@@ -303,10 +304,9 @@ def _call_anthropic(cfg: dict, system_prompt: str, user_prompt: str) -> str:
     client = anthropic.Anthropic(api_key=cfg["api_key"], base_url=cfg["base_url"])
     resp = client.messages.create(
         model=cfg["model"],
-        max_tokens=4096,
+        max_completion_tokens=4096,
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
-        temperature=0.3,
     )
     return resp.content[0].text if resp.content else ""
 

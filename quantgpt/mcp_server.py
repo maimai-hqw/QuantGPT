@@ -451,7 +451,7 @@ async def run_anti_overfit(
 
         executor = get_executor()
         future = executor.submit_cpu_work(
-            _run_backtest_in_process, market_df, expression,
+            _run_backtest_in_process, market_df, expression, 5,
             holding_period=holding_period, cost_rate=0,
             neutralize_industry=neutralize_industry, neutralize_cap=neutralize_cap,
         )
@@ -517,7 +517,7 @@ async def run_rolling_validation(
 
         executor = get_executor()
         future = executor.submit_cpu_work(
-            _run_backtest_in_process, market_df, expression,
+            _run_backtest_in_process, market_df, expression, 5,
             holding_period=holding_period, cost_rate=0,
             neutralize_industry=neutralize_industry, neutralize_cap=neutralize_cap,
         )

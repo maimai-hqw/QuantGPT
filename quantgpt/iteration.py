@@ -293,29 +293,73 @@ def _call_llm(system_prompt: str, user_prompt: str, temperature: float = 0.9) ->
 
     from .llm_service import clean_expression as _clean_expression
 
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
+    from .llm_config import get_llm_config
+
+    cfg = get_llm_config()
+    provider = cfg["provider"]
+
+    # Codex CLI provider — drives a ChatGPT subscription via subprocess
+    if provider == "codex":
+        from .codex_client import chat_complete as _codex_chat
+        from .llm_service import clean_expression as _clean_expression
+        # Codex uses its own model names (gpt-5, gpt-5.5). LLM_MODEL is set
+        # for the openai-compatible path (e.g., deepseek-v4-pro) and would
+        # confuse codex; only honor an explicit CODEX_MODEL override.
+        codex_model = os.environ.get("CODEX_MODEL") or None
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        last_err = None
+        for attempt in range(3):
+            try:
+                r = _codex_chat(messages, model=codex_model)
+                return _clean_expression(r.text)
+            except Exception as e:
+                last_err = e
+                logger.warning(f"codex attempt {attempt+1} failed: {e}")
+                _time.sleep(3 * (attempt + 1))
+        raise RuntimeError(f"codex call failed after 3 attempts: {last_err}")
+
+    # OpenAI-compatible HTTP API provider
+    api_key = cfg["api_key"]
     if not api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY not set")
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        raise RuntimeError("LLM_API_KEY (or OPENAI_API_KEY fallback) not set")
+    base_url = cfg["base_url"]
+    model = cfg["model"]
     client = OpenAI(api_key=api_key, base_url=base_url)
 
+    base_kwargs = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "timeout": 60,
+    }
+
     for attempt in range(3):
-        try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=temperature,
-                max_tokens=256,
-                timeout=60,
-            )
-            return _clean_expression(resp.choices[0].message.content)
-        except Exception as e:
-            logger.warning(f"LLM call attempt {attempt+1} failed: {e}")
-            _time.sleep(3 * (attempt + 1))
+        # Newer reasoning models (o1, gpt-5*) require max_completion_tokens
+        # and may reject custom temperature; try strict-modern first, fall back.
+        attempts = [
+            {**base_kwargs, "max_completion_tokens": 2048, "temperature": temperature},
+            {**base_kwargs, "max_completion_tokens": 2048},
+            {**base_kwargs, "max_tokens": 2048, "temperature": temperature},
+        ]
+        last_err = None
+        for kwargs in attempts:
+            try:
+                resp = client.chat.completions.create(**kwargs)
+                return _clean_expression(resp.choices[0].message.content)
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                # Only fall through on parameter-shape errors; bail on auth/network issues
+                if "unsupported_parameter" in msg or "max_tokens" in msg or "temperature" in msg or "max_completion_tokens" in msg:
+                    continue
+                break
+        logger.warning(f"LLM call attempt {attempt+1} failed: {last_err}")
+        _time.sleep(3 * (attempt + 1))
     raise RuntimeError("LLM call failed after 3 attempts")
 
 

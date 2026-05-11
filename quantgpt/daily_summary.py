@@ -4,7 +4,7 @@ Pipeline:
 1. Fetch market data (hs300 stocks, last 70 days) + benchmark returns
 2. Compute factor signals from 15 core factor templates
 3. Build rich LLM prompt with real factor data
-4. Generate markdown report via DeepSeek
+4. Generate markdown report via OpenAI
 5. Store to DB
 """
 
@@ -29,9 +29,12 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _TEMPLATES_PATH = Path(__file__).resolve().parent / "templates" / "factors.json"
 
-_DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-_DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-_DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+from .llm_config import get_llm_config
+
+_LLM_CFG = get_llm_config()
+_OPENAI_API_KEY = _LLM_CFG["api_key"]
+_OPENAI_BASE_URL = _LLM_CFG["base_url"]
+_OPENAI_MODEL = _LLM_CFG["model"]
 
 
 def _load_factor_templates() -> list:
@@ -325,16 +328,15 @@ def _build_llm_prompt(
 
 
 def _call_llm(prompt: str) -> str:
-    """Call DeepSeek LLM for market summary."""
-    client = OpenAI(api_key=_DEEPSEEK_API_KEY, base_url=_DEEPSEEK_BASE_URL)
+    """Call OpenAI LLM for market summary."""
+    client = OpenAI(api_key=_OPENAI_API_KEY, base_url=_OPENAI_BASE_URL)
     resp = client.chat.completions.create(
-        model=_DEEPSEEK_MODEL,
+        model=_OPENAI_MODEL,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.4,
-        max_tokens=5000,
+        max_completion_tokens=5000,
     )
     text = resp.choices[0].message.content.strip()
 
@@ -491,7 +493,7 @@ async def generate_daily_summary(db, market: str = "a_share", date: str | None =
 
     # Step 5: Build prompt and call LLM
     prompt = _build_llm_prompt(today, index_changes, factor_signals, regime_data, industry_signals, history_summaries)
-    logger.info(f"[daily_summary] LLM prompt: {len(prompt)} chars, calling DeepSeek...")
+    logger.info(f"[daily_summary] LLM prompt: {len(prompt)} chars, calling OpenAI...")
     content = _call_llm(prompt)
     logger.info(f"[daily_summary] LLM response: {len(content)} chars")
 
