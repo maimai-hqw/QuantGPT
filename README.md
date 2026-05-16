@@ -19,6 +19,12 @@ LLM Agent 自治因子挖矿 → 批量回测 → 多维评分 → 反过拟合�
 [Factor Mining](docs/FACTOR_MINING.md) ·
 [Contributing](CONTRIBUTING.md)
 
+**WeChat / 微信交流群**: Add `quantgpt_ai` on WeChat to join the community
+
+<a href="https://star-history.com/#Miasyster/QuantGPT&Date">
+  <img src="docs/images/star-history.png" width="600" alt="Star History Chart" />
+</a>
+
 </div>
 
 ---
@@ -32,7 +38,7 @@ The core architecture:
 ```
 LLM Agent (Claude Code / Claude Desktop)
     │
-    ├── MCP Tools (8 个)          ← Agent 的工具箱
+    ├── MCP Tools (14 个)         ← Agent 的工具箱
     │   ├── run_backtest           ← 全市场分组回测
     │   ├── score_factor           ← 0-100 综合评分
     │   ├── diagnose_factor        ← 失败模式诊断
@@ -40,7 +46,13 @@ LLM Agent (Claude Code / Claude Desktop)
     │   ├── run_rolling_validation ← Walk-forward 验证
     │   ├── validate_expression    ← 语法校验
     │   ├── list_operators         ← 50+ 算子文档
-    │   └── list_universes         ← 股票池和基准
+    │   ├── list_universes         ← 股票池和基准
+    │   ├── wq_brain_submit        ← WQ BRAIN 单因子提交
+    │   ├── wq_brain_batch_submit  ← 批量参数扫描提交
+    │   ├── wq_brain_submit_by_ids ← 按 ID 提交
+    │   ├── wq_brain_list_alphas   ← 查询已提交 alpha
+    │   ├── wq_brain_check_alphas  ← 检查 alpha 状态
+    │   └── wq_brain_finalize_submissions ← 最终提交确认
     │
     ├── Evolution Engine           ← 因子进化引擎
     │   ├── MutationEngine (8 方向突变)
@@ -351,7 +363,7 @@ TrajectoryAnalyzer → MetaEvolutionSelector → Strategy Execution
 | Knowledge accumulation | Personal notes | None | Lost between sessions | **Structured KB across sessions** |
 | WQ BRAIN integration | -- | -- | -- | **Operator-aligned + direct submission** |
 | Anti-overfit | -- | -- | -- | **4 statistical tests + walk-forward** |
-| MCP / AI Agent | -- | -- | -- | **8 tools, skill-loop orchestration** |
+| MCP / AI Agent | -- | -- | -- | **14 tools, skill-loop orchestration** |
 | Live trading | Yes | Limited | -- | -- |
 | Intraday data | Yes | Yes | -- | Daily only |
 
@@ -392,6 +404,35 @@ curl -X POST http://localhost:8003/api/v1/auto_backtest \
   -d '{"expression": "rank(close / ts_mean(close, 20))", "universe": "hs300"}'
 ```
 
+### Windows Quick Start
+
+Windows 用户不需要 `make` 和 `restart.sh`，手动执行即可：
+
+```powershell
+# 1. 克隆项目
+git clone https://github.com/Miasyster/QuantGPT.git
+cd QuantGPT
+
+# 2. 创建虚拟环境并安装依赖
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+# 可选：装 PostgreSQL 支持
+# pip install -e ".[postgresql]"
+
+# 3. 构建前端（需要 Node.js，从 nodejs.org 下载 LTS 版本）
+cd frontend && npm install && npm run build && cd ..
+
+# 4. 启动服务
+python -m quantgpt --transport http
+# 浏览器打开 http://localhost:8003
+```
+
+> **注意：**
+> - 推荐 Python 3.11 或 3.12（3.14 太新，部分依赖可能不兼容）
+> - 如果端口被占用：`netstat -ano | findstr :8003` 查进程，`taskkill /PID <pid> /F` 杀掉
+> - 也可以使用 WSL2（`wsl --install`），体验与 macOS/Linux 完全一致
+
 **Zero config by default**: SQLite database, baostock + akshare free data. See [full Quick Start guide](docs/QUICKSTART.md) for details.
 
 <details>
@@ -419,6 +460,24 @@ alembic upgrade head
 <details>
 <summary><b>Expression Examples</b></summary>
 
+**Local backtest** — works out of the box with baostock/akshare data:
+
+```python
+# 20-day momentum
+rank(close / ts_mean(close, 20))
+
+# Low volatility
+rank(-1 * ts_std(close/ts_shift(close,1)-1, 20))
+
+# Decay-weighted correlation
+decay_linear(rank(ts_corr(vwap, volume, 10)), 5)
+
+# Momentum + profitability composite
+-1 * rank(ts_av_diff(close, 10)) + rank(roe)
+```
+
+**WQ BRAIN remote** — requires WQ BRAIN submission (fields like `debt`, `enterprise_value` are not available locally):
+
 ```python
 # Debt-momentum composite — BRAIN submitted, Fitness 1.26, Sharpe 1.77
 -1 * rank(ts_av_diff(close, 10)) + rank(debt / enterprise_value)
@@ -428,15 +487,6 @@ alembic upgrade head
 
 # Returns-volume momentum — BRAIN submitted, Fitness 1.03, Sharpe 1.60
 -1 * rank(ts_decay_linear(returns * volume / adv20, 5))
-
-# 20-day momentum
-rank(close / ts_mean(close, 20))
-
-# Low volatility
-rank(-1 * ts_std(close/ts_shift(close,1)-1, 20))
-
-# Decay-weighted correlation
-decay_linear(rank(ts_corr(vwap, volume, 10)), 5)
 ```
 
 </details>
@@ -452,7 +502,7 @@ quantgpt/
 │   ├── backtest.py              # Rank-based group backtest engine
 │   ├── market_data.py           # baostock/akshare → Parquet cache
 │   ├── api_server.py            # FastAPI REST API + SSE
-│   ├── mcp_server.py            # FastMCP server (8 tools — Agent's toolkit)
+│   ├── mcp_server.py            # FastMCP server (14 tools — Agent's toolkit)
 │   ├── iteration.py             # 3-phase evolutionary iteration
 │   ├── mutation_engine.py       # 8 directed mutation strategies
 │   ├── crossover_engine.py      # High-score factor crossover
@@ -463,7 +513,6 @@ quantgpt/
 │   ├── wq_simulate.py           # WQ BRAIN dollar-neutral simulator
 │   ├── wq_brain_client.py       # WQ BRAIN API integration
 │   ├── neutralize.py            # Industry & cap neutralization
-│   ├── paper_engine.py          # Paper trading engine
 │   ├── daily_summary.py         # LLM-powered daily market report
 │   └── routes/                  # API route modules
 ├── frontend/                    # React 18 + TypeScript + Tailwind CSS 4

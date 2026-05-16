@@ -124,6 +124,7 @@ class TestWQBrainSubmitEndpoint:
     async def test_submit_requires_auth(self, client):
         resp = await client.post("/api/v1/wq-brain/submit", json={
             "expression": "rank(close)",
+            "tag": "test-agent",
         })
         assert resp.status_code in (401, 403)
 
@@ -131,6 +132,7 @@ class TestWQBrainSubmitEndpoint:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "", "WQ_BRAIN_PASSWORD": ""}, clear=False):
             resp = await client.post("/api/v1/wq-brain/submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
             }, headers=auth_headers)
             assert resp.status_code == 503
 
@@ -139,6 +141,7 @@ class TestWQBrainSubmitEndpoint:
             with patch("quantgpt.routes.wq_brain._run_wq_brain_task"):
                 resp = await client.post("/api/v1/wq-brain/submit", json={
                     "expression": "rank(close)",
+                    "tag": "test-agent",
                 }, headers=auth_headers)
                 assert resp.status_code == 202
                 data = resp.json()

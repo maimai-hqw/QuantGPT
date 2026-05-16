@@ -1,6 +1,5 @@
 import { useCallback, useState, useEffect } from "react";
 import type { Task } from "./types/backtest";
-import type { StrategyTask } from "./types/strategy";
 import { useBacktest } from "./hooks/useBacktest";
 import { useTaskHistory } from "./hooks/useTaskHistory";
 import { useSession } from "./hooks/useSession";
@@ -13,8 +12,6 @@ import ResultsDashboard from "./components/ResultsDashboard";
 import IterationPanel from "./components/IterationPanel";
 import CompositeBuilder from "./components/CompositeBuilder";
 import FactorComparison from "./components/FactorComparison";
-import PaperTrading from "./components/PaperTrading";
-import StrategyBacktest from "./components/StrategyBacktest";
 import ResearchDashboard from "./components/ResearchDashboard";
 import TabNavigation, { TABS } from "./components/TabNavigation";
 import type { MainTab } from "./components/TabNavigation";
@@ -72,18 +69,6 @@ export default function App() {
   } = useSession();
 
   const { tasks, addTask } = useTaskHistory(activeSessionId);
-
-  // Strategy backtest history (separate from factor tasks)
-  const { tasks: strategyTasks, addTask: addStrategyTask } = useTaskHistory(activeSessionId, "strategy_backtest");
-  const [restoredStrategyTask, setRestoredStrategyTask] = useState<StrategyTask | null>(null);
-
-  const onStrategyComplete = useCallback(
-    (task: StrategyTask) => {
-      addStrategyTask(task as unknown as Task);
-      refreshSessions();
-    },
-    [addStrategyTask, refreshSessions]
-  );
 
   const onComplete = useCallback(
     (task: Task) => {
@@ -201,7 +186,7 @@ export default function App() {
 
       <div className="mx-auto max-w-7xl px-6 py-6 flex gap-6">
         {/* Main content area — changes per tab */}
-        <main className={`min-w-0 space-y-4 ${(activeTab === "backtest" || activeTab === "strategy") ? "flex-1" : "w-full"}`}>
+        <main className={`min-w-0 space-y-4 ${activeTab === "backtest" ? "flex-1" : "w-full"}`}>
           {activeTab === "dashboard" && (
             <ResearchDashboard />
           )}
@@ -230,7 +215,6 @@ export default function App() {
                   onSaveFactor={isGuest ? undefined : handleSaveFactor}
                   isSaving={saving}
                   isSaved={savedExpressions.has(activeTask.result.params.expression)}
-                  onGoToPaper={isGuest ? undefined : () => setActiveTab("paper")}
                   iterationSlot={isGuest ? undefined :
                     <IterationPanel
                       parentTaskId={activeTask.task_id}
@@ -245,15 +229,6 @@ export default function App() {
             </>
           )}
 
-          {activeTab === "strategy" && (
-            <StrategyBacktest
-              sessionId={activeSessionId}
-              onComplete={onStrategyComplete}
-              restoredTask={restoredStrategyTask}
-              onClearRestored={() => setRestoredStrategyTask(null)}
-            />
-          )}
-
           {activeTab === "composite" && (
             <CompositeBuilder
               onSubmit={handleCompositeSubmit}
@@ -266,15 +241,11 @@ export default function App() {
             <FactorComparison savedExpressions={Array.from(savedExpressions)} />
           )}
 
-          {activeTab === "paper" && !isGuest && (
-            <PaperTrading />
-          )}
         </main>
 
         {/* Sidebar — visible on backtest and strategy tabs for logged-in users */}
-        {(activeTab === "backtest" || activeTab === "strategy") && !isGuest && (
+        {activeTab === "backtest" && !isGuest && (
           <AppSidebar
-            activeTab={activeTab}
             sidebarTab={sidebarTab}
             onSidebarTabChange={setSidebarTab}
             sessions={sessions}
@@ -287,10 +258,6 @@ export default function App() {
             onDeleteSession={deleteSession}
             onSelectTask={(task) => setActiveTask(task)}
             factorLibKey={factorLibKey}
-            strategyTasks={strategyTasks}
-            restoredStrategyTaskId={restoredStrategyTask?.task_id}
-            onStrategySwitchSession={(id) => { switchSession(id); setRestoredStrategyTask(null); }}
-            onSelectStrategyTask={(task) => setRestoredStrategyTask(task as unknown as StrategyTask)}
           />
         )}
       </div>

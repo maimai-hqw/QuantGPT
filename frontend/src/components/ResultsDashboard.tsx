@@ -1,6 +1,6 @@
 import type { BacktestResult } from "../types/backtest";
-import { useState, type ReactNode } from "react";
-import { Star, LineChart } from "lucide-react";
+import { type ReactNode } from "react";
+import { Star } from "lucide-react";
 import MetricCard from "./MetricCard";
 import GroupReturnsTable from "./GroupReturnsTable";
 import ReportViewer from "./ReportViewer";
@@ -8,7 +8,6 @@ import StockFactorPanel from "./StockFactorPanel";
 import FactorInterpretationCard from "./FactorInterpretationCard";
 import ShareCardButton from "./ShareCardButton";
 import WQBrainCard from "./WQBrainCard";
-import { createPaperStrategy } from "../api/paper";
 import { useColorMode } from "../contexts/ColorModeContext";
 
 interface Props {
@@ -17,7 +16,6 @@ interface Props {
   onSaveFactor?: () => void;
   isSaving?: boolean;
   isSaved?: boolean;
-  onGoToPaper?: () => void;
 }
 
 function pct(n: number): string {
@@ -28,27 +26,9 @@ function num(n: number): string {
   return n.toFixed(4);
 }
 
-export default function ResultsDashboard({ result, iterationSlot, onSaveFactor, isSaving, isSaved, onGoToPaper }: Props) {
+export default function ResultsDashboard({ result, iterationSlot, onSaveFactor, isSaving, isSaved }: Props) {
   const { isDark } = useColorMode();
   const { metrics, backtest_summary, report_url, params } = result;
-  const [paperStatus, setPaperStatus] = useState<"idle" | "creating" | "created" | "error">("idle");
-
-  const handleCreatePaper = async () => {
-    setPaperStatus("creating");
-    try {
-      await createPaperStrategy({
-        expression: params.expression,
-        name: params.expression.slice(0, 40),
-        universe: params.universe,
-        holding_period: params.holding_period,
-        n_groups: params.n_groups,
-      });
-      setPaperStatus("created");
-      if (onGoToPaper) setTimeout(onGoToPaper, 1000);
-    } catch {
-      setPaperStatus("error");
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -70,20 +50,6 @@ export default function ResultsDashboard({ result, iterationSlot, onSaveFactor, 
               {isSaved ? "已收藏" : isSaving ? "保存中..." : "收藏因子"}
             </button>
           )}
-          <button
-            onClick={handleCreatePaper}
-            disabled={paperStatus === "creating" || paperStatus === "created"}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
-              paperStatus === "created"
-                ? `${isDark ? "text-teal-400" : "text-teal-600"} ${isDark ? "bg-teal-500/10" : "bg-teal-50"} cursor-default`
-                : paperStatus === "error"
-                ? `${isDark ? "text-red-400" : "text-red-600"} ${isDark ? "bg-red-500/10" : "bg-red-50"}`
-                : `${isDark ? "text-teal-400" : "text-teal-700"} ${isDark ? "bg-teal-500/10" : "bg-teal-50"} ${isDark ? "hover:bg-teal-500/20" : "hover:bg-teal-100"}`
-            }`}
-          >
-            <LineChart className="h-3.5 w-3.5" />
-            {paperStatus === "created" ? "已上模拟盘 ✓" : paperStatus === "creating" ? "创建中..." : paperStatus === "error" ? "创建失败" : "上模拟盘"}
-          </button>
           <span className="text-xs text-gray-400">
             {params.universe} · {params.start_date} ~ {params.end_date} · {params.stock_count} 只股票
           </span>

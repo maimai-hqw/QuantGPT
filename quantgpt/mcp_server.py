@@ -26,8 +26,16 @@ from .expression_parser import __doc__ as _expr_module_doc
 from .expression_parser import parse_expression
 from .fundamental_data import ALL_FUNDAMENTAL_NAMES
 from .market_data import BENCHMARK_CODES, UNIVERSES, MarketDataFetcher, fetch_benchmark_returns, get_universe
-from .mcp_tracking import track_mcp_result
+from .mcp_task_helper import complete_mcp_task, start_mcp_task
 from .report import generate_report
+from .wq_brain_service import (
+    run_batch_simulation,
+    run_check_alphas,
+    run_list_alphas,
+    run_single_simulation,
+    run_submit_by_ids,
+    safe_float,
+)
 from .task_executor import _run_backtest_in_process, get_executor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s", stream=sys.stderr)
@@ -156,9 +164,13 @@ async def run_backtest(
     Returns:
         JSON string with report_path, metrics, group_returns, anti_overfit.
     """
-    _start = time.monotonic()
+    task_id = await start_mcp_task("backtest", expression, {
+        "universe": universe, "start_date": start_date, "end_date": end_date,
+        "n_groups": n_groups, "holding_period": holding_period, "benchmark": benchmark,
+        "neutralize_industry": neutralize_industry, "neutralize_cap": neutralize_cap,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         logger.info(f"Getting universe: {universe}")
         market_df, stock_codes = await asyncio.to_thread(_fetch_data_for_market, universe, start_date, end_date)
@@ -175,7 +187,6 @@ async def run_backtest(
         )
         result = await asyncio.to_thread(future.result, 600)
 
-        # Anti-overfit analysis
         anti_overfit_result = None
         factor_df = result.get("_factor_df")
         if factor_df is not None and len(factor_df) > 100:
@@ -198,7 +209,7 @@ async def run_backtest(
             title=f"Factor: {expression}",
         )
 
-        output = {
+        _result = {
             "report_path": report_result["report_path"],
             "metrics": report_result["metrics"],
             "backtest_summary": {
@@ -233,19 +244,14 @@ async def run_backtest(
                 "stock_count": len(stock_codes),
             },
         }
-        _result_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"Backtest failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_backtest", expression,
-                         {"universe": universe, "start_date": start_date, "end_date": end_date,
-                          "n_groups": n_groups, "holding_period": holding_period, "benchmark": benchmark},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
@@ -280,9 +286,12 @@ async def score_factor(
     """
     from .iteration import compute_factor_score
 
-    _start = time.monotonic()
+    task_id = await start_mcp_task("score", expression, {
+        "universe": universe, "start_date": start_date, "end_date": end_date,
+        "n_groups": n_groups, "holding_period": holding_period, "benchmark": benchmark,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         market_df, stock_codes = await asyncio.to_thread(_fetch_data_for_market, universe, start_date, end_date)
         if market_df is None or len(market_df) == 0:
@@ -323,7 +332,7 @@ async def score_factor(
             report_metrics=report_result["metrics"],
         )
 
-        output = {
+        _result = {
             "score": scoring["score"],
             "grade": scoring["grade"],
             "component_scores": scoring["component_scores"],
@@ -337,20 +346,16 @@ async def score_factor(
                 "sharpe": report_result["metrics"].get("sharpe", 0),
                 "max_drawdown": report_result["metrics"].get("max_drawdown", 0),
             },
+            "interpretation": {"rating": scoring["grade"]},
         }
-        _result_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"Score failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_score", expression,
-                         {"universe": universe, "start_date": start_date, "end_date": end_date,
-                          "n_groups": n_groups, "holding_period": holding_period, "benchmark": benchmark},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
@@ -439,9 +444,12 @@ async def run_anti_overfit(
     """
     from .anti_overfit import run_anti_overfit as _run_ao
 
-    _start = time.monotonic()
+    task_id = await start_mcp_task("anti_overfit", expression, {
+        "universe": universe, "start_date": start_date, "end_date": end_date,
+        "holding_period": holding_period,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         market_df, stock_codes = await asyncio.to_thread(_fetch_data_for_market, universe, start_date, end_date)
         if market_df is None or len(market_df) == 0:
@@ -451,8 +459,8 @@ async def run_anti_overfit(
 
         executor = get_executor()
         future = executor.submit_cpu_work(
-            _run_backtest_in_process, market_df, expression, 5,
-            holding_period=holding_period, cost_rate=0,
+            _run_backtest_in_process, market_df, expression, 5, holding_period,
+            cost_rate=0,
             neutralize_industry=neutralize_industry, neutralize_cap=neutralize_cap,
         )
         result = await asyncio.to_thread(future.result, 600)
@@ -460,20 +468,15 @@ async def run_anti_overfit(
         if factor_df is None or len(factor_df) < 100:
             return json.dumps({"error": "Insufficient factor data for anti-overfit analysis."})
 
-        ao_result = await asyncio.to_thread(_run_ao, factor_df, holding_period)
-        _result_str = json.dumps(ao_result, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        _result = await asyncio.to_thread(_run_ao, factor_df, holding_period)
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"Anti-overfit failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_antioverfit", expression,
-                         {"universe": universe, "start_date": start_date, "end_date": end_date,
-                          "holding_period": holding_period},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
@@ -505,9 +508,12 @@ async def run_rolling_validation(
     """
     from .rolling_validator import run_rolling_validation as _run_rv
 
-    _start = time.monotonic()
+    task_id = await start_mcp_task("rolling_validation", expression, {
+        "universe": universe, "start_date": start_date, "end_date": end_date,
+        "holding_period": holding_period,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         market_df, stock_codes = await asyncio.to_thread(_fetch_data_for_market, universe, start_date, end_date)
         if market_df is None or len(market_df) == 0:
@@ -517,8 +523,8 @@ async def run_rolling_validation(
 
         executor = get_executor()
         future = executor.submit_cpu_work(
-            _run_backtest_in_process, market_df, expression, 5,
-            holding_period=holding_period, cost_rate=0,
+            _run_backtest_in_process, market_df, expression, 5, holding_period,
+            cost_rate=0,
             neutralize_industry=neutralize_industry, neutralize_cap=neutralize_cap,
         )
         result = await asyncio.to_thread(future.result, 600)
@@ -526,25 +532,21 @@ async def run_rolling_validation(
         if factor_df is None or len(factor_df) < 100:
             return json.dumps({"error": "Insufficient factor data for rolling validation."})
 
-        rv_result = await asyncio.to_thread(_run_rv, factor_df, holding_period)
-        _result_str = json.dumps(rv_result, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        _result = await asyncio.to_thread(_run_rv, factor_df, holding_period)
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"Rolling validation failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_rolling", expression,
-                         {"universe": universe, "start_date": start_date, "end_date": end_date,
-                          "holding_period": holding_period},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
 async def wq_brain_submit(
     expression: str,
+    tag: str,
     region: str = "USA",
     universe: str = "TOP3000",
     delay: int = 1,
@@ -562,7 +564,8 @@ async def wq_brain_submit(
 
     Args:
         expression: FASTEXPR 表达式 (如 "rank(close/open)")
-        region: 市场区域 (USA, CHN 等)
+        tag: 提交者标识 (如 "agent-lowcorr-0506")，用于追踪哪个 agent 提交
+        region: 市场区域 (当前仅 USA 可用)
         universe: WQ Universe (TOP3000, TOP500 等)
         delay: 信号延迟 (0 或 1)
         decay: Alpha 衰减 (0-20)
@@ -573,72 +576,50 @@ async def wq_brain_submit(
     Returns:
         JSON with IS/OOS metrics, alpha_id, checks, submittable status.
     """
-    from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+    from .wq_brain_client import get_client, is_configured as _wq_configured
 
-    _start = time.monotonic()
+    task_id = await start_mcp_task("wq_brain_submit", expression, {
+        "expression": expression, "tag": tag, "region": region, "universe": universe,
+        "delay": delay, "decay": decay, "neutralization": neutralization,
+        "truncation": truncation, "auto_submit": auto_submit,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         if not _wq_configured():
-            _result_str = json.dumps({"error": "WQ BRAIN 未配置 — 请设置 WQ_BRAIN_EMAIL 和 WQ_BRAIN_PASSWORD"})
-            return _result_str
+            return json.dumps({"error": "WQ BRAIN 未配置 — 请设置 WQ_BRAIN_EMAIL 和 WQ_BRAIN_PASSWORD"})
 
-        client = WQBrainClient()
-
+        client = get_client("primary")
         authenticated = await asyncio.to_thread(client.authenticate)
         if not authenticated:
-            _result_str = json.dumps({"error": "WQ BRAIN 认证失败"})
-            return _result_str
+            return json.dumps({"error": "WQ BRAIN 认证失败"})
 
-        result = await asyncio.to_thread(
-            client.simulate,
+        _result = await asyncio.to_thread(
+            run_single_simulation, client,
             expression, region=region, universe=universe,
             delay=delay, decay=decay, neutralization=neutralization,
-            truncation=truncation,
+            truncation=truncation, auto_submit=auto_submit, tag=tag,
         )
-
-        if not result.get("ok"):
-            _result_str = json.dumps({"error": result.get("error", "Simulation failed")})
-            return _result_str
-
-        alpha_id = result.get("alpha_id")
-        is_data = result.get("is", {})
-        fitness = float(is_data.get("fitness", 0) or 0)
-        rating = "A" if fitness >= 1.0 else ("B" if fitness >= 0.5 else "C")
-
-        submitted = False
-        if auto_submit and alpha_id and rating == "A":
-            submit_result = await asyncio.to_thread(client.submit_alpha, alpha_id)
-            submitted = submit_result.get("ok", False)
-
         await asyncio.to_thread(client.close)
 
-        output = {
-            "expression": expression,
-            "alpha_id": alpha_id,
-            "is_metrics": result.get("is", {}),
-            "oos_metrics": result.get("oos", {}),
-            "rating": rating,
-            "submitted": submitted,
-            "simulation_id": result.get("simulation_id"),
-        }
-        _result_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        if not _result.get("ok"):
+            _error_msg = _result.get("error", "Simulation failed")
+            return json.dumps({"error": _error_msg})
+
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"WQ BRAIN submit failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_wq_brain", expression,
-                         {"region": region, "universe": universe, "delay": delay},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
 async def wq_brain_batch_submit(
     expression: str,
+    tag: str,
     regions: list[str] | None = None,
     delays: list[int] | None = None,
     universes: list[str] | None = None,
@@ -654,6 +635,7 @@ async def wq_brain_batch_submit(
 
     Args:
         expression: FASTEXPR 表达式
+        tag: 提交者标识 (如 "agent-lowcorr-0506")，用于追踪哪个 agent 提交
         regions: 市场区域列表 (默认 ["USA"])
         delays: 信号延迟列表 (默认 [1])
         universes: Universe 列表 (默认 ["TOP3000"])
@@ -665,111 +647,52 @@ async def wq_brain_batch_submit(
     Returns:
         JSON with per-combination results, best_fitness, submittable_count.
     """
-    from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+    from .wq_brain_client import get_client, is_configured as _wq_configured
 
-    _start = time.monotonic()
+    regions = regions or ["USA"]
+    delays = delays or [1]
+    universes = universes or ["TOP3000"]
+    neutralizations = neutralizations or ["SUBINDUSTRY"]
+
+    task_id = await start_mcp_task("wq_brain_batch", expression, {
+        "expression": expression, "tag": tag,
+        "regions": regions, "delays": delays, "universes": universes,
+        "neutralizations": neutralizations, "decay": decay, "truncation": truncation,
+        "auto_submit": auto_submit,
+    })
     _error_msg = None
-    _result_str = None
+    _result = None
     try:
         if not _wq_configured():
-            _result_str = json.dumps({"error": "WQ BRAIN 未配置 — 请设置 WQ_BRAIN_EMAIL 和 WQ_BRAIN_PASSWORD"})
-            return _result_str
+            return json.dumps({"error": "WQ BRAIN 未配置 — 请设置 WQ_BRAIN_EMAIL 和 WQ_BRAIN_PASSWORD"})
 
-        regions = regions or ["USA"]
-        delays = delays or [1]
-        universes = universes or ["TOP3000"]
-        neutralizations = neutralizations or ["SUBINDUSTRY"]
+        total = len(regions) * len(delays) * len(universes) * len(neutralizations)
+        if total > 36:
+            return json.dumps({"error": f"组合数 {total} 超过上限 36"})
 
-        import itertools
-        combos = list(itertools.product(regions, delays, universes, neutralizations))
-        if len(combos) > 36:
-            _result_str = json.dumps({"error": f"组合数 {len(combos)} 超过上限 36"})
-            return _result_str
-
-        client = WQBrainClient()
+        client = get_client("primary")
         authenticated = await asyncio.to_thread(client.authenticate)
         if not authenticated:
-            _result_str = json.dumps({"error": "WQ BRAIN 认证失败"})
-            return _result_str
+            return json.dumps({"error": "WQ BRAIN 认证失败"})
 
-        best_fitness = -999
-        best_key = None
-        submittable_count = 0
-        sub_results = {}
-
-        for region, delay, universe, neut in combos:
-            key = f"{region}_D{delay}_{universe}_{neut}"
-
-            result = await asyncio.to_thread(
-                client.simulate,
-                expression, region=region, universe=universe,
-                delay=delay, decay=decay, neutralization=neut,
-                truncation=truncation,
-            )
-
-            sub = {"key": key, "region": region, "delay": delay, "universe": universe, "neutralization": neut}
-
-            if not result.get("ok"):
-                sub["status"] = "failed"
-                sub["error"] = result.get("error", "unknown")
-            else:
-                alpha_id = result.get("alpha_id")
-                is_data = result.get("is", {})
-                checks = {}
-                submittable = False
-                submitted = False
-                if auto_submit and alpha_id:
-                    submit_result = await asyncio.to_thread(client.submit_alpha, alpha_id)
-                    submitted = submit_result.get("ok", False)
-
-                def _safe_float(val):
-                    if val is None:
-                        return None
-                    try:
-                        return float(val)
-                    except (TypeError, ValueError):
-                        return None
-
-                fitness = _safe_float(is_data.get("fitness"))
-                sub["status"] = "completed"
-                sub["alpha_id"] = alpha_id
-                sub["sharpe"] = _safe_float(is_data.get("sharpe"))
-                sub["fitness"] = fitness
-                sub["returns"] = _safe_float(is_data.get("returns"))
-                sub["turnover"] = _safe_float(is_data.get("turnover"))
-                sub["submitted"] = submitted
-
-                if fitness is not None and fitness >= 1.0:
-                    submittable_count += 1
-                if fitness is not None and fitness > best_fitness:
-                    best_fitness = fitness
-                    best_key = key
-
-            sub_results[key] = sub
-
+        _result = await asyncio.to_thread(
+            run_batch_simulation, client, expression,
+            regions=regions, delays=delays, universes=universes,
+            neutralizations=neutralizations, decay=decay, truncation=truncation,
+            auto_submit=auto_submit, tag=tag,
+        )
         await asyncio.to_thread(client.close)
 
-        output = {
-            "expression": expression,
-            "total_combinations": len(combos),
-            "best_fitness": round(best_fitness, 4) if best_fitness > -999 else None,
-            "best_key": best_key,
-            "submittable_count": submittable_count,
-            "sub_results": sub_results,
-        }
-        _result_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
-        return _result_str
+        if not _result.get("ok"):
+            _error_msg = _result.get("error")
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
         logger.error(f"WQ BRAIN batch failed: {traceback.format_exc()}")
         _error_msg = str(e)
-        _result_str = json.dumps({"error": str(e)})
-        return _result_str
+        return json.dumps({"error": str(e)})
     finally:
-        track_mcp_result("mcp_wq_brain_batch", expression,
-                         {"regions": regions, "delays": delays, "universes": universes,
-                          "neutralizations": neutralizations},
-                         _result_str, _error_msg, time.monotonic() - _start)
+        await complete_mcp_task(task_id, _result, _error_msg, expression)
 
 
 @mcp.tool()
@@ -789,7 +712,7 @@ async def wq_brain_submit_by_ids(
     Returns:
         JSON with per-alpha result (ACTIVE/SC_FAIL/TIMEOUT) and summary.
     """
-    from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+    from .wq_brain_client import get_client, is_configured as _wq_configured
 
     if account != "primary":
         return json.dumps({"error": "Alpha 提交仅允许 primary 账号"})
@@ -798,46 +721,30 @@ async def wq_brain_submit_by_ids(
     if len(alpha_ids) > 50:
         return json.dumps({"error": f"alpha_ids 数量 {len(alpha_ids)} 超过上限 50"})
 
-    client = WQBrainClient()
-    authenticated = await asyncio.to_thread(client.authenticate)
-    if not authenticated:
-        return json.dumps({"error": "WQ BRAIN 认证失败"})
+    task_id = await start_mcp_task(
+        "wq_brain_submit_by_ids",
+        None,
+        {"alpha_ids": alpha_ids, "account": account},
+    )
+    _result = None
+    _error_msg = None
 
-    results = {}
-    active = 0
-    sc_fail = 0
-    timeout = 0
+    try:
+        client = get_client(account)
+        authenticated = await asyncio.to_thread(client.authenticate)
+        if not authenticated:
+            _error_msg = "WQ BRAIN 认证失败"
+            return json.dumps({"error": _error_msg})
 
-    for alpha_id in alpha_ids:
-        result = await asyncio.to_thread(client.submit_alpha, alpha_id)
-        entry = {
-            "ok": result.get("ok", False),
-            "detail": result.get("detail", ""),
-            "platform_status": result.get("platform_status", ""),
-        }
-        if result.get("sc_value") is not None:
-            entry["sc_value"] = result["sc_value"]
-            entry["sc_limit"] = result.get("sc_limit")
+        _result = await asyncio.to_thread(run_submit_by_ids, client, alpha_ids)
+        await asyncio.to_thread(client.close)
 
-        if result.get("ok"):
-            active += 1
-        elif "SC FAIL" in result.get("detail", ""):
-            sc_fail += 1
-        elif result.get("platform_status") == "TIMEOUT":
-            timeout += 1
-
-        results[alpha_id] = entry
-
-    await asyncio.to_thread(client.close)
-
-    output = {
-        "total": len(alpha_ids),
-        "active": active,
-        "sc_fail": sc_fail,
-        "timeout": timeout,
-        "results": results,
-    }
-    return json.dumps(output, ensure_ascii=False, indent=2, default=str)
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
+    except Exception as e:
+        _error_msg = str(e)
+        return json.dumps({"error": _error_msg})
+    finally:
+        await complete_mcp_task(task_id, _result, _error_msg)
 
 
 @mcp.tool()
@@ -862,63 +769,27 @@ async def wq_brain_list_alphas(
     Returns:
         JSON with alpha list, each containing alpha_id, expression, metrics.
     """
-    from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+    from .wq_brain_client import get_client, is_configured as _wq_configured
 
     if not _wq_configured(account):
         return json.dumps({"error": f"WQ BRAIN 未配置 (account={account})"})
 
-    client = WQBrainClient()
+    client = get_client(account)
     authenticated = await asyncio.to_thread(client.authenticate)
     if not authenticated:
         return json.dumps({"error": "WQ BRAIN 认证失败"})
 
-    s = client._get_session()
-    r = await asyncio.to_thread(
-        s.get,
-        "https://api.worldquantbrain.com/users/self/alphas",
-        params={"limit": min(limit, 100), "offset": offset, "order": "-dateCreated"},
+    result = await asyncio.to_thread(
+        run_list_alphas, client,
+        limit=limit, offset=offset,
+        min_fitness=min_fitness, status_filter=status_filter,
     )
     await asyncio.to_thread(client.close)
 
-    if r.status_code != 200:
-        return json.dumps({"error": f"HTTP {r.status_code}: {r.text[:300]}"})
+    if not result.get("ok"):
+        return json.dumps({"error": result.get("error", "unknown")})
 
-    data = r.json()
-    raw_alphas = data if isinstance(data, list) else data.get("results", [])
-
-    alphas = []
-    for a in raw_alphas:
-        code = a.get("regular", {})
-        expr = code.get("code", "") if isinstance(code, dict) else str(code)
-        settings = a.get("settings", {})
-        is_data = a.get("is", {})
-
-        fitness = None
-        try:
-            fitness = float(is_data.get("fitness")) if is_data.get("fitness") is not None else None
-        except (TypeError, ValueError):
-            pass
-
-        alpha_status = a.get("status", "")
-
-        if min_fitness is not None and (fitness is None or fitness < min_fitness):
-            continue
-        if status_filter and alpha_status.upper() != status_filter.upper():
-            continue
-
-        alphas.append({
-            "alpha_id": a.get("id"),
-            "expression": expr,
-            "status": alpha_status,
-            "dateCreated": a.get("dateCreated"),
-            "neutralization": settings.get("neutralization"),
-            "sharpe": is_data.get("sharpe"),
-            "fitness": fitness,
-            "returns": is_data.get("returns"),
-            "turnover": is_data.get("turnover"),
-        })
-
-    return json.dumps({"total": len(alphas), "alphas": alphas}, ensure_ascii=False, indent=2, default=str)
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
 @mcp.tool()
@@ -937,59 +808,22 @@ async def wq_brain_check_alphas(
     Returns:
         JSON with summary and per-alpha status.
     """
-    from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+    from .wq_brain_client import get_client, is_configured as _wq_configured
 
     if not _wq_configured(account):
         return json.dumps({"error": f"WQ BRAIN 未配置 (account={account})"})
     if len(alpha_ids) > 50:
         return json.dumps({"error": f"alpha_ids 数量 {len(alpha_ids)} 超过上限 50"})
 
-    client = WQBrainClient()
+    client = get_client(account)
     authenticated = await asyncio.to_thread(client.authenticate)
     if not authenticated:
         return json.dumps({"error": "WQ BRAIN 认证失败"})
 
-    results = {}
-    for alpha_id in alpha_ids:
-        data = await asyncio.to_thread(client.check_alpha_status, alpha_id)
-        if not data.get("ok"):
-            results[alpha_id] = {"ok": False, "error": data.get("error", "not found")}
-            continue
-
-        is_data = data.get("is", {})
-        checks = is_data.get("checks", [])
-        sc_check = next((c for c in checks if c.get("name") == "SELF_CORRELATION"), None)
-
-        def _sf(val):
-            if val is None:
-                return None
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                return None
-
-        results[alpha_id] = {
-            "ok": True,
-            "status": data.get("status"),
-            "grade": data.get("grade"),
-            "sharpe": _sf(is_data.get("sharpe")),
-            "fitness": _sf(is_data.get("fitness")),
-            "returns": _sf(is_data.get("returns")),
-            "turnover": _sf(is_data.get("turnover")),
-            "sc_result": sc_check.get("result") if sc_check else None,
-            "sc_value": sc_check.get("value") if sc_check else None,
-        }
-
+    result = await asyncio.to_thread(run_check_alphas, client, alpha_ids)
     await asyncio.to_thread(client.close)
 
-    summary = {
-        "total": len(alpha_ids),
-        "active": sum(1 for r in results.values() if r.get("status") == "ACTIVE"),
-        "unsubmitted": sum(1 for r in results.values() if r.get("status") == "UNSUBMITTED"),
-        "sc_fail": sum(1 for r in results.values() if r.get("sc_result") == "FAIL"),
-        "sc_pending": sum(1 for r in results.values() if r.get("sc_result") == "PENDING"),
-    }
-    return json.dumps({"summary": summary, "alphas": results}, ensure_ascii=False, indent=2, default=str)
+    return json.dumps(result, ensure_ascii=False, indent=2, default=str)
 
 
 @mcp.tool()
@@ -1009,12 +843,13 @@ async def wq_brain_finalize_submissions(
     Returns:
         JSON: per-alpha final_status (ACTIVE/SC_FAIL/SC_PENDING/ERROR) + summary
     """
-    t0 = time.time()
-    error_msg = None
-    result_data = None
-
+    task_id = await start_mcp_task("wq_brain_finalize", None, {
+        "alpha_ids": alpha_ids[:10], "account": account, "total": len(alpha_ids),
+    })
+    _error_msg = None
+    _result = None
     try:
-        from .wq_brain_client import WQBrainClient, is_configured as _wq_configured
+        from .wq_brain_client import get_client, is_configured as _wq_configured
         from .routes.wq_brain_batch import _finalize_alpha_statuses
 
         if not _wq_configured(account):
@@ -1022,33 +857,25 @@ async def wq_brain_finalize_submissions(
         if len(alpha_ids) > 100:
             return json.dumps({"error": f"alpha_ids 数量 {len(alpha_ids)} 超过上限 100"})
 
-        client = WQBrainClient()
+        client = get_client(account)
         authenticated = await asyncio.to_thread(client.authenticate)
         if not authenticated:
             return json.dumps({"error": "WQ BRAIN 认证失败"})
 
-        result_data = await asyncio.to_thread(
+        _result = await asyncio.to_thread(
             _finalize_alpha_statuses, client, alpha_ids, None,
         )
 
         await asyncio.to_thread(client.close)
 
-        return json.dumps(result_data, ensure_ascii=False, indent=2, default=str)
+        return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
 
     except Exception as e:
-        error_msg = str(e)
+        _error_msg = str(e)
         logger.error(f"MCP wq_brain_finalize error: {e}")
         return json.dumps({"error": f"Finalize failed: {e}"})
     finally:
-        elapsed = time.time() - t0
-        track_mcp_result(
-            "mcp_wq_finalize",
-            expression=",".join(alpha_ids[:5]),
-            params={"alpha_ids": alpha_ids[:10], "account": account, "total": len(alpha_ids)},
-            result_str=json.dumps(result_data) if result_data else None,
-            error=error_msg,
-            elapsed=elapsed,
-        )
+        await complete_mcp_task(task_id, _result, _error_msg)
 
 
 # Operator documentation fallback

@@ -8,7 +8,7 @@ import threading
 import time
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -66,6 +66,14 @@ from ..task_store import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Attach UTC timezone to naive datetimes (SQLite drops tzinfo)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 router = APIRouter()
 
@@ -377,8 +385,9 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
                 logger.error(f"[{task_id}] DB persist error: {e}")
 
 
-@router.get("/api/v1/health")
+@router.get("/api/v1/health", summary="健康检查")
 def health():
+    """检查服务状态，返回当前活跃任务数和总任务数。不需要认证。"""
     from ..auth import is_auth_disabled
     return {
         "status": "ok",
@@ -388,36 +397,48 @@ def health():
     }
 
 
-@router.post("/api/v1/tasks/{task_id}/cancel")
+@router.post("/api/v1/tasks/{task_id}/cancel", summary="取消回测任务")
 async def cancel_task(
     task_id: str,
     user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    task = tasks.get(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-
     user_id = str(user.id) if user else GUEST_USER_ID
-    if task.get("user_id") != user_id:
-        raise HTTPException(status_code=403, detail="无权操作此任务")
 
-    if task["status"] in ("completed", "failed", "cancelled", "iteration_completed"):
+    task = tasks.get(task_id)
+    if task:
+        if task.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="无权操作此任务")
+        if task["status"] in ("completed", "failed", "cancelled", "iteration_completed"):
+            raise HTTPException(status_code=400, detail="任务已结束，无法取消")
+        with tasks_lock:
+            task["cancelled"] = True
+            task["status"] = "cancelled"
+        logger.info(f"[{task_id}] cancel requested by user")
+        return {"task_id": task_id, "status": "cancelled"}
+
+    result = await db.execute(
+        select(TaskModel).where(TaskModel.id == task_id, TaskModel.user_id == user.id)
+    )
+    db_task = result.scalar_one_or_none()
+    if not db_task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if db_task.status in ("completed", "failed", "cancelled", "iteration_completed"):
         raise HTTPException(status_code=400, detail="任务已结束，无法取消")
-
-    with tasks_lock:
-        task["cancelled"] = True
-        task["status"] = "cancelled"
-
-    logger.info(f"[{task_id}] cancel requested by user")
+    db_task.status = "cancelled"
+    db_task.error = "用户手动取消"
+    await db.commit()
+    logger.info(f"[{task_id}] db task cancelled by user")
     return {"task_id": task_id, "status": "cancelled"}
 
 
-@router.post("/api/v1/auto_backtest", status_code=202)
+@router.post("/api/v1/auto_backtest", status_code=202, summary="提交因子回测任务")
 async def auto_backtest(
     req: AutoBacktestRequest,
     request: Request,
     user: User | None = Depends(get_optional_user),
 ):
+    """提交异步回测任务。支持自然语言 prompt 或直接因子表达式。返回 task_id，用 GET /api/v1/tasks/{task_id} 轮询结果。"""
     client_ip = request.client.host if request.client else "unknown"
 
     if not check_rate_limit(client_ip):
@@ -458,7 +479,7 @@ async def auto_backtest(
     return {"task_id": task_id, "status": "pending"}
 
 
-@router.get("/api/v1/tasks/stats")
+@router.get("/api/v1/tasks/stats", summary="任务统计")
 async def task_stats(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -501,12 +522,12 @@ async def task_stats(
     }
 
 
-@router.get("/api/v1/tasks")
+@router.get("/api/v1/tasks", summary="查询任务列表")
 async def list_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     session_id: str | None = Query(None, description="按会话 ID 过滤"),
-    task_type: str | None = Query(None, description="按任务类型过滤: backtest / strategy_backtest / iteration"),
+    task_type: str | None = Query(None, description="按任务类型过滤: backtest / iteration / composite"),
     status: str | None = Query(None, description="按状态过滤: completed / failed / pending"),
     rating: str | None = Query(None, description="按评级过滤: A / B / C / D"),
     user: User = Depends(get_current_user),
@@ -540,7 +561,11 @@ async def list_tasks(
 
     query = select(TaskModel).where(TaskModel.user_id == user.id)
     if session_id is not None:
-        query = query.where(TaskModel.session_id == session_id)
+        import uuid as _uuid
+        try:
+            query = query.where(TaskModel.session_id == _uuid.UUID(session_id))
+        except ValueError:
+            pass
     if task_type is not None:
         query = query.where(TaskModel.task_type == task_type)
     if status is not None:
@@ -565,8 +590,8 @@ async def list_tasks(
                 "expression": dt.expression,
                 "result": dt.result,
                 "error": dt.error,
-                "created_at": dt.created_at.isoformat() if dt.created_at else None,
-                "completed_at": dt.updated_at.isoformat() if dt.status in ("completed", "failed", "cancelled", "iteration_completed") and dt.updated_at else None,
+                "created_at": _ensure_utc(dt.created_at).isoformat() if dt.created_at else None,
+                "completed_at": _ensure_utc(dt.updated_at).isoformat() if dt.status in ("completed", "failed", "cancelled", "iteration_completed") and dt.updated_at else None,
                 "duration_seconds": dur,
             }
             if rating is not None:
@@ -593,12 +618,13 @@ async def list_tasks(
     return {"tasks": [sanitize_task_response(t) for t in merged], "page": page, "page_size": page_size, "total": total}
 
 
-@router.get("/api/v1/tasks/{task_id}")
+@router.get("/api/v1/tasks/{task_id}", summary="查询任务状态和结果")
 async def get_task(
     task_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """返回任务当前状态。status=completed 时 result 字段包含回测指标（Sharpe、IC、Fitness 等）。回测是异步的，提交后需轮询此端点直到 status 变为 completed 或 failed。"""
     user_id = str(user.id)
 
     task = tasks.get(task_id)

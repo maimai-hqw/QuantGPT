@@ -179,7 +179,7 @@ export interface Task {
   expression?: string;
   error?: string;
   result?: BacktestResult;
-  task_type?: "backtest" | "iteration" | "composite" | "strategy_backtest";
+  task_type?: "backtest" | "iteration" | "composite";
   parent_task_id?: string;
   candidates?: IterationCandidate[];
   candidates_done?: number;

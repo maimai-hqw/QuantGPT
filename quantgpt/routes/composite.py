@@ -70,13 +70,13 @@ class AttributionRequest(BaseModel):
     _validate_dates = field_validator("start_date", "end_date")(validate_date_format)
 
 
-@router.post("/composite-backtest", status_code=202)
+@router.post("/composite-backtest", status_code=202, summary="多因子组合回测")
 async def composite_backtest(
     req: CompositeBacktestRequest,
     request: Request,
     user: User = Depends(get_current_user),
 ):
-    """提交多因子组合回测任务。"""
+    """提交多因子等权/加权组合回测任务，评估因子组合的综合表现。"""
     from ..task_store import (  # noqa: I001
         MAX_ACTIVE_TASKS, active_task_count as _active_task_count,
         check_rate_limit as _check_rate_limit, cleanup_tasks as _cleanup_tasks,

@@ -12,6 +12,7 @@ class TestBatchSubmitValidation:
     async def test_requires_auth(self, client):
         resp = await client.post("/api/v1/wq-brain/batch-submit", json={
             "expression": "rank(close)",
+            "tag": "test-agent",
         })
         assert resp.status_code in (401, 403)
 
@@ -19,6 +20,7 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "", "WQ_BRAIN_PASSWORD": ""}, clear=False):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
             }, headers=auth_headers)
             assert resp.status_code == 503
 
@@ -26,6 +28,7 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
                 "regions": ["INVALID"],
             }, headers=auth_headers)
             assert resp.status_code == 400
@@ -35,6 +38,7 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
                 "universes": ["INVALID"],
             }, headers=auth_headers)
             assert resp.status_code == 400
@@ -44,6 +48,7 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
                 "neutralizations": ["BOGUS"],
             }, headers=auth_headers)
             assert resp.status_code == 400
@@ -53,6 +58,7 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
+                "tag": "test-agent",
                 "delays": [5],
             }, headers=auth_headers)
             assert resp.status_code == 400
@@ -62,7 +68,8 @@ class TestBatchSubmitValidation:
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
-                "regions": ["USA", "CHN"],
+                "tag": "test-agent",
+                "regions": ["USA"],
                 "delays": [0, 1],
                 "universes": ["TOP3000", "TOP1000", "TOP500", "TOP200"],
                 "neutralizations": ["MARKET", "SUBINDUSTRY", "INDUSTRY", "SECTOR", "NONE"],
@@ -77,6 +84,7 @@ class TestBatchSubmitCreatesTask:
             with patch("quantgpt.routes.wq_brain_batch._run_batch_task"):
                 resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                     "expression": "rank(close)",
+                    "tag": "test-agent",
                 }, headers=auth_headers)
                 assert resp.status_code == 202
                 data = resp.json()
@@ -89,20 +97,21 @@ class TestBatchSubmitCreatesTask:
             with patch("quantgpt.routes.wq_brain_batch._run_batch_task"):
                 resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                     "expression": "rank(close/open)",
-                    "regions": ["USA", "CHN"],
+                    "tag": "test-agent",
+                    "regions": ["USA"],
                     "delays": [0, 1],
                     "universes": ["TOP3000"],
                     "neutralizations": ["SUBINDUSTRY", "MARKET"],
                 }, headers=auth_headers)
                 assert resp.status_code == 202
                 data = resp.json()
-                assert data["total_combinations"] == 2 * 2 * 1 * 2
+                assert data["total_combinations"] == 1 * 2 * 1 * 2
 
 
 class TestBatchRequestModel:
     def test_defaults(self):
         from quantgpt.routes.wq_brain_batch import WQBrainBatchRequest
-        req = WQBrainBatchRequest(expression="rank(close)")
+        req = WQBrainBatchRequest(expression="rank(close)", tag="test")
         assert req.regions == ["USA"]
         assert req.delays == [1]
         assert req.universes == ["TOP3000"]
@@ -110,44 +119,23 @@ class TestBatchRequestModel:
         assert req.decay == 0
         assert req.truncation == 0.08
         assert req.auto_submit is False
+        assert req.tag == "test"
 
     def test_custom_values(self):
         from quantgpt.routes.wq_brain_batch import WQBrainBatchRequest
         req = WQBrainBatchRequest(
             expression="ts_mean(close, 5)",
-            regions=["USA", "CHN"],
+            tag="test-sweep",
+            regions=["USA"],
             delays=[0, 1],
             decay=5,
             truncation=0.1,
             auto_submit=True,
         )
-        assert req.regions == ["USA", "CHN"]
+        assert req.regions == ["USA"]
         assert req.delays == [0, 1]
         assert req.decay == 5
         assert req.auto_submit is True
+        assert req.tag == "test-sweep"
 
 
-class TestMCPTrackingBatch:
-    def test_extract_summary_batch(self):
-        import json
-        from quantgpt.mcp_tracking import _extract_summary
-
-        data = json.dumps({
-            "total_combinations": 8,
-            "best_fitness": 1.23,
-            "best_key": "USA_D1_TOP3000_SUBINDUSTRY",
-            "submittable_count": 2,
-        })
-        summary = _extract_summary(data, "mcp_wq_brain_batch")
-        assert summary["total_combinations"] == 8
-        assert summary["best_fitness"] == 1.23
-        assert summary["best_key"] == "USA_D1_TOP3000_SUBINDUSTRY"
-        assert summary["submittable_count"] == 2
-
-    def test_extract_summary_batch_error(self):
-        import json
-        from quantgpt.mcp_tracking import _extract_summary
-
-        data = json.dumps({"error": "WQ BRAIN 未配置"})
-        summary = _extract_summary(data, "mcp_wq_brain_batch")
-        assert "error" in summary

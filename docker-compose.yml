@@ -1,0 +1,19 @@
+services:
+  quantgpt:
+    build: .
+    ports:
+      - "8003:8003"
+    volumes:
+      - quantgpt-data:/app/data
+      - quantgpt-reports:/app/reports
+      - ./quantgpt.db:/app/quantgpt.db
+    env_file:
+      - .env
+    environment:
+      - AUTH_DISABLED=true
+      - DATABASE_URL=postgresql+asyncpg://quantgpt:password@host.docker.internal:5433/quantgpt
+    restart: unless-stopped
+
+volumes:
+  quantgpt-data:
+  quantgpt-reports:

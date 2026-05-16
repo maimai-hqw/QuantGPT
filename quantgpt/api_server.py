@@ -28,11 +28,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from . import task_store
 from .db import close_db, init_db
-from .models import User
+from .models import Task as TaskModel, User
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,17 @@ async def lifespan(app: FastAPI):
     task_store.main_loop = asyncio.get_running_loop()
     await init_db()
     logger.info("Database initialized")
+
+    from .db import _get_session_factory as _sf
+    async with _sf()() as session:
+        result = await session.execute(
+            update(TaskModel)
+            .where(TaskModel.status.in_(["pending", "running", "generating_expression", "validating", "fetching_data", "backtesting"]))
+            .values(status="failed", error="进程重启，任务中断")
+        )
+        if result.rowcount:
+            await session.commit()
+            logger.info(f"Cleaned up {result.rowcount} stale running tasks")
 
     from .auth import _DEV_USER_ID, is_auth_disabled
     if is_auth_disabled():
@@ -63,20 +74,6 @@ async def lifespan(app: FastAPI):
     from .scheduler_registry import record_job_run, register_job, register_scheduler
     CST = ZoneInfo("Asia/Shanghai")
     scheduler = AsyncIOScheduler()
-
-    async def _paper_settlement_job():
-        from .db import _get_session_factory
-        from .paper_engine import run_daily_settlement
-        async with _get_session_factory()() as db:
-            try:
-                await run_daily_settlement(db)
-                record_job_run("paper_settlement", "success")
-            except Exception as e:
-                logger.error(f"Paper settlement job failed: {e}")
-                record_job_run("paper_settlement", "failed", str(e))
-
-    scheduler.add_job(_paper_settlement_job, CronTrigger(hour=16, minute=30, day_of_week="mon-fri", timezone=CST), id="paper_settlement")
-    register_job("paper_settlement", "模拟盘日结算", "每个交易日收盘后结算模拟持仓盈亏", "周一至周五 16:30 CST")
 
     async def _market_data_refresh_job():
         import asyncio
@@ -129,38 +126,14 @@ async def lifespan(app: FastAPI):
 
     register_scheduler(scheduler)
     scheduler.start()
-    logger.info("Paper trading scheduler started (weekdays 16:30 CST)")
-    logger.info("Factor research report scheduler started (Monday 09:03 CST)")
+    logger.info("Scheduler started")
 
     from .mcp_server import mcp as _mcp_server
     _mcp_server.streamable_http_app()
     async with _mcp_server.session_manager.run():
         logger.info("MCP streamable-http session manager started")
 
-        jq_username = os.environ.get("JQ_USERNAME", "")
-        jq_password = os.environ.get("JQ_PASSWORD", "")
-        if jq_username and jq_password:
-            try:
-                from .jq_automation import get_jq_service
-                jq = get_jq_service()
-                ok = await jq.startup()
-                if ok:
-                    logger.info("JoinQuant browser started and logged in")
-                else:
-                    logger.warning("JoinQuant browser login failed — strategy backtest may not work")
-            except Exception as e:
-                logger.error(f"JoinQuant browser startup error: {e}")
-        else:
-            logger.info("JQ_USERNAME/JQ_PASSWORD not set — skipping JoinQuant browser")
-
         yield
-
-    try:
-        from .jq_automation import get_jq_service
-        jq = get_jq_service()
-        await jq.shutdown()
-    except Exception:
-        pass
 
     scheduler.shutdown(wait=False)
     from .task_executor import shutdown_executor
@@ -178,10 +151,10 @@ _cors_list = [o.strip() for o in _cors_origins.split(",") if o.strip()]
 app = FastAPI(
     title="QuantGPT API",
     version="2.8.0",
-    description="QuantGPT — AI 驱动的量化策略回测平台",
+    description="QuantGPT — Agent-Native 因子研究平台。AI Agent 通过本 API 自主完成因子设计、回测、评分、诊断、反过拟合检测和 WQ BRAIN 提交。",
     docs_url=None,
     redoc_url=None,
-    openapi_url=None,
+    openapi_url="/openapi.json",
     lifespan=lifespan,
 )
 
@@ -202,9 +175,7 @@ from .routes.daily_summary import router as daily_summary_router
 from .routes.factor_library import router as factor_library_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
-from .routes.paper import router as paper_router
 from .routes.sessions import router as sessions_router
-from .routes.strategy_backtest import router as strategy_backtest_router
 from .routes.wq_brain import router as wq_brain_router
 from .routes.wq_brain_batch import router as wq_brain_batch_router
 
@@ -214,9 +185,7 @@ app.include_router(admin_router)
 app.include_router(factor_library_router)
 app.include_router(composite_router)
 app.include_router(comparison_router)
-app.include_router(paper_router)
 app.include_router(daily_summary_router)
-app.include_router(strategy_backtest_router)
 app.include_router(backtest_tasks_router)
 app.include_router(iteration_router)
 app.include_router(feedback_router)
@@ -266,7 +235,7 @@ def _mount_spa():
                 from fastapi.responses import FileResponse
                 return FileResponse(str(static_file))
         if _index_html.is_file():
-            return HTMLResponse(_index_html.read_text())
+            return HTMLResponse(_index_html.read_text(encoding="utf-8"))
         raise HTTPException(status_code=404, detail="Frontend not built")
 
 

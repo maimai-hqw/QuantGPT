@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import create_admin_token, require_admin
+from ..auth import create_admin_token, create_api_key_for_user, require_admin
 from ..db import get_db
-from ..models import Feedback, Task, User
+from ..models import ApiKey, Feedback, Task, User
 
 logger = logging.getLogger(__name__)
 
@@ -415,3 +415,56 @@ async def admin_rqdatac_incremental():
         return {"message": "rqdatac 增量刷新完成"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---- API Key Management ----
+
+
+class CreateApiKeyRequest(BaseModel):
+    user_email: str
+    name: str | None = None
+
+
+@router.post("/api-keys", dependencies=[Depends(require_admin)])
+async def admin_create_api_key(req: CreateApiKeyRequest, db: AsyncSession = Depends(get_db)):
+    """Generate an API Key for a user (by email). Returns the raw key once — store it."""
+    result = await db.execute(select(User).where(User.email == req.user_email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail=f"用户 {req.user_email} 不存在")
+    raw_key = await create_api_key_for_user(user.id, req.name, db)
+    return {"api_key": raw_key, "user_email": user.email, "user_id": str(user.id)}
+
+
+@router.get("/api-keys", dependencies=[Depends(require_admin)])
+async def admin_list_api_keys(db: AsyncSession = Depends(get_db)):
+    """List all API Keys (prefix only, not full key)."""
+    result = await db.execute(
+        select(ApiKey, User.email)
+        .join(User, ApiKey.user_id == User.id)
+        .order_by(desc(ApiKey.created_at))
+    )
+    keys = []
+    for ak, email in result.all():
+        keys.append({
+            "id": str(ak.id),
+            "prefix": ak.prefix,
+            "name": ak.name,
+            "user_email": email,
+            "is_active": ak.is_active,
+            "last_used_at": ak.last_used_at.isoformat() if ak.last_used_at else None,
+            "created_at": ak.created_at.isoformat(),
+        })
+    return {"api_keys": keys}
+
+
+@router.delete("/api-keys/{key_id}", dependencies=[Depends(require_admin)])
+async def admin_revoke_api_key(key_id: str, db: AsyncSession = Depends(get_db)):
+    """Revoke (deactivate) an API Key."""
+    result = await db.execute(select(ApiKey).where(ApiKey.id == uuid_mod.UUID(key_id)))
+    ak = result.scalar_one_or_none()
+    if not ak:
+        raise HTTPException(status_code=404, detail="API Key 不存在")
+    ak.is_active = False
+    await db.commit()
+    return {"id": str(ak.id), "is_active": False}

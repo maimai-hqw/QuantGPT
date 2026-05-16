@@ -135,7 +135,7 @@ async def send_code(req: SendCodeRequest, db: AsyncSession = Depends(get_db)):
 
     vc = VerificationCode(email=req.email, code=code, expires_at=expires_at)
     db.add(vc)
-    await db.flush()
+    await db.commit()
 
     try:
         await send_verification_email(req.email, code)
@@ -168,19 +168,18 @@ async def verify_code(req: VerifyCodeRequest, db: AsyncSession = Depends(get_db)
 
     if vc.attempts >= 5:
         vc.used = True
-        await db.flush()
+        await db.commit()
         raise HTTPException(status_code=400, detail="验证码尝试次数过多，请重新获取")
 
     vc.attempts += 1
 
     if vc.code != req.code:
-        await db.flush()
+        await db.commit()
         remaining = 5 - vc.attempts
         raise HTTPException(status_code=400, detail=f"验证码错误，还可尝试 {remaining} 次")
 
     # Code matched
     vc.used = True
-    await db.flush()
 
     # Find or create user
     user_result = await db.execute(select(User).where(User.email == req.email))
@@ -189,11 +188,11 @@ async def verify_code(req: VerifyCodeRequest, db: AsyncSession = Depends(get_db)
     if not user:
         user = User(email=req.email)
         db.add(user)
-        await db.flush()
         logger.info(f"New user registered: {req.email}")
     else:
         user.last_login_at = now
-        await db.flush()
+
+    await db.commit()
 
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
@@ -228,7 +227,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
 
     user.last_login_at = datetime.now(timezone.utc)
-    await db.flush()
+    await db.commit()
 
     access_token = create_access_token(user.id, user.email)
     refresh_token = create_refresh_token(user.id)
@@ -261,7 +260,7 @@ async def set_password(
             raise HTTPException(status_code=400, detail="当前密码错误")
 
     user.password_hash = hash_password(req.password)
-    await db.flush()
+    await db.commit()
     logger.info(f"Password set for user: {user.email}")
 
     return {"message": "密码设置成功", "has_password": True}
@@ -288,18 +287,17 @@ async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(g
 
     if vc.attempts >= 5:
         vc.used = True
-        await db.flush()
+        await db.commit()
         raise HTTPException(status_code=400, detail="验证码尝试次数过多，请重新获取")
 
     vc.attempts += 1
 
     if vc.code != req.code:
-        await db.flush()
+        await db.commit()
         remaining = 5 - vc.attempts
         raise HTTPException(status_code=400, detail=f"验证码错误，还可尝试 {remaining} 次")
 
     vc.used = True
-    await db.flush()
 
     user_result = await db.execute(select(User).where(User.email == req.email))
     user = user_result.scalar_one_or_none()
@@ -308,7 +306,7 @@ async def reset_password(req: ResetPasswordRequest, db: AsyncSession = Depends(g
         raise HTTPException(status_code=404, detail="用户不存在")
 
     user.password_hash = hash_password(req.new_password)
-    await db.flush()
+    await db.commit()
     logger.info(f"Password reset for user: {user.email}")
 
     return {"message": "密码重置成功"}
@@ -343,7 +341,7 @@ async def me(user: User = Depends(get_current_user)):
         "nickname": user.nickname,
         "has_password": user.password_hash is not None,
         "subscribe_weekly": user.subscribe_weekly,
-        "created_at": user.created_at.isoformat(),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
     }
 
 

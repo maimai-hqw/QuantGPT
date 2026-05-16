@@ -22,35 +22,20 @@ from ..task_store import (
     MAX_ACTIVE_TASKS,
 )
 from ..wq_brain_client import SUBMIT_THRESHOLDS, WQBrainClient, configured_accounts, get_client, is_configured
+from ..wq_brain_service import fitness_to_grade, run_list_alphas, run_single_simulation, safe_float
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/wq-brain", tags=["wq_brain"])
 
 
-def _safe_float(val) -> float | None:
-    if val is None:
-        return None
-    try:
-        return float(val)
-    except (TypeError, ValueError):
-        return None
-
-
-def _fitness_to_grade(fitness: float | None) -> str:
-    if fitness is None:
-        return "D"
-    if fitness >= 1.0:
-        return "A"
-    if fitness >= 0.5:
-        return "B"
-    if fitness >= 0.25:
-        return "C"
-    return "D"
+_safe_float = safe_float
+_fitness_to_grade = fitness_to_grade
 
 
 class WQBrainSubmitRequest(BaseModel):
     expression: str = Field(..., description="FASTEXPR factor expression")
+    tag: str = Field(..., min_length=1, max_length=100, description="Submitter tag (e.g. 'agent-lowcorr-0506')")
     region: str = Field("USA", description="Market region")
     universe: str = Field("TOP3000", description="WQ Universe")
     delay: int = Field(1, ge=0, le=1, description="Signal delay")
@@ -83,84 +68,26 @@ def _run_wq_brain_task(task_id: str, req: WQBrainSubmitRequest, user_id: str):
             task["progress"] = pct
             task["progress_message"] = message
 
-        result = client.simulate(
-            expression=req.expression,
-            region=req.region,
-            universe=req.universe,
-            delay=req.delay,
-            decay=req.decay,
-            neutralization=req.neutralization,
-            truncation=req.truncation,
+        result = run_single_simulation(
+            client, expression=req.expression,
+            region=req.region, universe=req.universe,
+            delay=req.delay, decay=req.decay,
+            neutralization=req.neutralization, truncation=req.truncation,
+            auto_submit=req.auto_submit and account == "primary",
+            user_id=user_id, tag=req.tag,
             progress_callback=on_progress,
         )
+        client.close()
 
         if not result.get("ok"):
             task["status"] = "failed"
             task["error"] = result.get("error", "WQ BRAIN simulation failed")
             return
 
-        alpha_id = result.get("alpha_id")
-
-        is_data = result.get("is", {})
-        sharpe = _safe_float(is_data.get("sharpe"))
-        fitness = _safe_float(is_data.get("fitness"))
-        returns_val = _safe_float(is_data.get("returns"))
-        turnover = _safe_float(is_data.get("turnover"))
-        rating = _fitness_to_grade(fitness)
-
-        submitted = False
-        if req.auto_submit and alpha_id and account == "primary" and rating == "A":
-            task["status"] = "submitting"
-            submit_result = client.submit_alpha(alpha_id)
-            logger.info(f"[{task_id}] auto_submit({alpha_id}): {submit_result}")
-            submitted = submit_result.get("ok", False)
-
-        if submitted and alpha_id:
-            try:
-                from ..alpha_tracker import record_submitted_alpha_sync
-                record_submitted_alpha_sync(
-                    user_id=user_id, alpha_id=alpha_id, expression=req.expression,
-                    region=req.region, universe=req.universe, delay=req.delay,
-                    decay=req.decay, neutralization=req.neutralization,
-                    truncation=req.truncation, sharpe=sharpe, fitness=fitness,
-                    returns=returns_val, turnover=turnover,
-                )
-            except Exception as e:
-                logger.warning(f"[{task_id}] alpha tracking failed: {e}")
-
-        client.close()
-
-        oos_data = result.get("oos", {})
-
         task["status"] = "completed"
         task["expression"] = req.expression
-        task["result"] = {
-            "expression": req.expression,
-            "alpha_id": alpha_id,
-            "is_metrics": is_data,
-            "oos_metrics": oos_data,
-            "settings": result.get("settings", {}),
-            "submitted": submitted,
-            "simulation_id": result.get("simulation_id"),
-            "backtest_summary": {
-                "long_short_sharpe": sharpe,
-                "wq_fitness": fitness,
-                "rank_ic_mean": None,
-                "turnover": turnover,
-                "wq_rating": rating,
-            },
-            "wq_brain": {
-                "wq_sharpe": sharpe,
-                "wq_fitness": fitness,
-                "wq_returns": returns_val,
-                "wq_turnover": turnover,
-                "wq_rating": rating,
-            },
-            "interpretation": {
-                "rating": rating,
-            },
-        }
-        logger.info(f"[{task_id}] WQ BRAIN completed: alpha_id={alpha_id} rating={rating} submitted={submitted}")
+        task["result"] = result
+        logger.info(f"[{task_id}] WQ BRAIN completed: alpha_id={result.get('alpha_id')} rating={result.get('interpretation', {}).get('rating')} submitted={result.get('submitted')}")
 
     except Exception as e:
         logger.error(f"[{task_id}] WQ BRAIN task error: {e}")
@@ -175,7 +102,7 @@ def _run_wq_brain_task(task_id: str, req: WQBrainSubmitRequest, user_id: str):
             logger.error(f"[{task_id}] DB persist error: {e}")
 
 
-@router.get("/status")
+@router.get("/status", summary="WQ BRAIN 配置状态")
 async def wq_brain_status():
     accounts = configured_accounts()
     return {
@@ -210,42 +137,20 @@ async def list_platform_alphas(
     client = get_client(account)
     if not client.authenticate():
         raise HTTPException(status_code=502, detail="WQ BRAIN 认证失败")
-    s = client._get_session()
-    r = s.get(
-        f"https://api.worldquantbrain.com/users/self/alphas",
-        params={"limit": limit, "offset": offset, "order": "-dateCreated"},
-    )
+    result = run_list_alphas(client, limit=limit, offset=offset)
     client.close()
-    if r.status_code != 200:
-        raise HTTPException(status_code=r.status_code, detail=r.text[:500])
-    data = r.json()
-    alphas = data if isinstance(data, list) else data.get("results", [])
-    result = []
-    for a in alphas:
-        code = a.get("regular", {})
-        expr = code.get("code", "") if isinstance(code, dict) else str(code)
-        settings = a.get("settings", {})
-        is_data = a.get("is", {})
-        result.append({
-            "alpha_id": a.get("id"),
-            "expression": expr,
-            "status": a.get("status"),
-            "dateCreated": a.get("dateCreated"),
-            "neutralization": settings.get("neutralization"),
-            "sharpe": is_data.get("sharpe"),
-            "fitness": is_data.get("fitness"),
-            "returns": is_data.get("returns"),
-            "turnover": is_data.get("turnover"),
-        })
-    return {"total": len(result), "alphas": result}
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail=result.get("error", "unknown"))
+    return {"total": result["total"], "alphas": result["alphas"]}
 
 
-@router.post("/submit", status_code=202)
+@router.post("/submit", status_code=202, summary="提交因子到 WQ BRAIN 模拟")
 async def wq_brain_submit(
     req: WQBrainSubmitRequest,
     request: Request,
     user: User = Depends(get_current_user),
 ):
+    """提交因子表达式到 WorldQuant BRAIN 平台进行模拟。异步执行，返回 task_id。模拟通常需要 2-5 分钟，用 GET /api/v1/tasks/{task_id} 轮询结果。结果包含 Sharpe、Fitness、Turnover 等 IS 指标。"""
     if not is_configured(req.account):
         raise HTTPException(status_code=503, detail=f"WQ BRAIN 未配置 (account={req.account}) — 请设置对应的环境变量")
 
@@ -279,7 +184,7 @@ async def wq_brain_submit(
     return {"task_id": task_id, "status": "pending"}
 
 
-@router.get("/submitted-alphas")
+@router.get("/submitted-alphas", summary="查询已提交因子列表")
 async def list_submitted_alphas(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
@@ -310,6 +215,7 @@ async def list_submitted_alphas(
             {
                 "alpha_id": a.alpha_id,
                 "expression": a.expression,
+                "tag": a.tag,
                 "region": a.region,
                 "universe": a.universe,
                 "delay": a.delay,
@@ -374,6 +280,7 @@ async def submit_alpha_from_task(
                 fitness=_safe_float(is_metrics.get("fitness")),
                 returns=_safe_float(is_metrics.get("returns")),
                 turnover=_safe_float(is_metrics.get("turnover")),
+                tag=params.get("tag"),
             )
         except Exception as e:
             logger.warning(f"Alpha tracking failed for manual submit: {e}")
@@ -419,4 +326,44 @@ async def submit_alpha_by_id(
     result = client.submit_alpha(alpha_id)
     client.close()
     logger.info(f"submit-by-id {alpha_id}: {result}")
+    return result
+
+
+@router.delete("/alpha/{alpha_id}")
+async def delete_alpha(
+    alpha_id: str,
+    account: str = "primary",
+    user: User = Depends(get_current_user),
+):
+    """Delete/retire an alpha from the WQ BRAIN platform."""
+    if not is_configured(account):
+        raise HTTPException(status_code=503, detail="WQ BRAIN 未配置")
+    client = get_client(account)
+    if not client.authenticate():
+        raise HTTPException(status_code=502, detail="WQ BRAIN 认证失败")
+    result = client.delete_alpha(alpha_id)
+    client.close()
+    logger.info(f"delete-alpha {alpha_id}: {result}")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail", "删除失败"))
+    return result
+
+
+@router.post("/alpha/{alpha_id}/unhide")
+async def unhide_alpha(
+    alpha_id: str,
+    account: str = "primary",
+    user: User = Depends(get_current_user),
+):
+    """Restore a hidden alpha on WQ BRAIN platform."""
+    if not is_configured(account):
+        raise HTTPException(status_code=503, detail="WQ BRAIN 未配置")
+    client = get_client(account)
+    if not client.authenticate():
+        raise HTTPException(status_code=502, detail="WQ BRAIN 认证失败")
+    result = client.unhide_alpha(alpha_id)
+    client.close()
+    logger.info(f"unhide-alpha {alpha_id}: {result}")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("detail", "恢复失败"))
     return result

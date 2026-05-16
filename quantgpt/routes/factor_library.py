@@ -49,7 +49,7 @@ def _factor_to_dict(f: SavedFactor) -> dict:
     }
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, summary="收藏因子到因子库")
 async def save_factor(
     req: SaveFactorRequest,
     user: User = Depends(get_current_user),
@@ -87,7 +87,7 @@ async def save_factor(
     return _factor_to_dict(factor)
 
 
-@router.get("")
+@router.get("", summary="查询因子库列表")
 async def list_factors(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -101,7 +101,7 @@ async def list_factors(
     return {"factors": [_factor_to_dict(f) for f in factors]}
 
 
-@router.patch("/{factor_id}")
+@router.patch("/{factor_id}", summary="更新因子信息")
 async def update_factor(
     factor_id: str,
     req: UpdateFactorRequest,

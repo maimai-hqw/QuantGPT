@@ -43,7 +43,7 @@ class CompareFactorsRequest(BaseModel):
     _validate_dates = field_validator("start_date", "end_date")(validate_date_format)
 
 
-@router.post("/compare-factors")
+@router.post("/compare-factors", summary="多因子对比分析")
 async def compare_factors(
     req: CompareFactorsRequest,
     user: User = Depends(get_current_user),

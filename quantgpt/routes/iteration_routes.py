@@ -188,7 +188,7 @@ def _run_iteration_task(task_id: str, parent_task_id: str, user_id: str, n_candi
                 logger.error(f"[{task_id}] DB persist error: {e}")
 
 
-@router.post("/api/v1/tasks/{task_id}/iterate", status_code=202)
+@router.post("/api/v1/tasks/{task_id}/iterate", status_code=202, summary="提交迭代优化任务")
 async def iterate_task(
     task_id: str,
     req: IterateRequest,
@@ -258,7 +258,7 @@ async def iterate_task(
     return {"task_id": iter_task_id, "status": "pending"}
 
 
-@router.post("/api/v1/tasks/{task_id}/select_candidate")
+@router.post("/api/v1/tasks/{task_id}/select_candidate", summary="选择迭代候选因子")
 async def select_candidate(
     task_id: str,
     req: SelectCandidateRequest,
@@ -296,7 +296,7 @@ async def select_candidate(
     }
 
 
-@router.get("/api/v1/reports/{filename}")
+@router.get("/api/v1/reports/{filename}", summary="下载 HTML 回测报告")
 async def get_report(
     filename: str,
     user: User = Depends(get_current_user),

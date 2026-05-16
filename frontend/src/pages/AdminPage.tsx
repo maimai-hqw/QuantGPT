@@ -420,7 +420,6 @@ function TasksTab() {
   const typeLabel = (t: string) => {
     switch (t) {
       case "backtest": return "单因子";
-      case "strategy_backtest": return "策略回测";
       case "iteration": return "迭代";
       case "composite": return "多因子组合";
       case "mcp_backtest": return "MCP 回测";
@@ -457,7 +456,6 @@ function TasksTab() {
           >
             <option value="">全部</option>
             <option value="backtest">单因子</option>
-            <option value="strategy_backtest">策略回测</option>
             <option value="iteration">迭代</option>
             <option value="composite">多因子组合</option>
             <option value="mcp_backtest">MCP 回测</option>

@@ -176,6 +176,7 @@ export default function ResearchDashboard() {
   };
   const getExpression = (task: Task) => task.expression || task.result?.params?.expression || (task.params as unknown as Record<string, unknown>)?.expression as string || "—";
   const getPrompt = (task: Task) => (task.params as unknown as Record<string, unknown>)?.prompt as string || task.result?.llm?.prompt || "—";
+  const getTag = (task: Task) => (task.params as unknown as Record<string, unknown>)?.tag as string || "";
   const getRating = (task: Task) => task.result?.interpretation?.rating || (task.result?.backtest_summary as unknown as Record<string, unknown>)?.wq_rating as string || "";
 
   const thClass = `text-left px-6 py-3.5 text-xs font-semibold uppercase tracking-wider ${isDark ? "text-gray-500" : "text-gray-400"}`;
@@ -279,6 +280,7 @@ export default function ResearchDashboard() {
                 <th className={thClass}>Task ID</th>
                 <th className={thClass}>Prompt</th>
                 <th className={thClass}>Expression</th>
+                <th className={thCenter}>Tag</th>
                 <th className={thCenter}>Grade</th>
                 <th className={thCenter}>Status</th>
                 <th className={thCenter}>Duration</th>
@@ -287,7 +289,7 @@ export default function ResearchDashboard() {
             </thead>
             <tbody className={isDark ? "divide-y divide-[#21262d]" : "divide-y divide-gray-100"}>
               {tasks.length === 0 && (
-                <tr><td colSpan={7} className={`text-center py-20 ${textMuted}`}>
+                <tr><td colSpan={8} className={`text-center py-20 ${textMuted}`}>
                   <div className="flex flex-col items-center gap-2">
                     <IconBrain />
                     <span className="text-sm">No research tasks yet</span>
@@ -306,6 +308,13 @@ export default function ResearchDashboard() {
                     <td className={`px-6 py-4 font-mono text-sm ${textMuted} whitespace-nowrap`}>{task.task_id}</td>
                     <td className={`px-6 py-4 max-w-[360px] truncate text-sm ${textPrimary}`}>{getPrompt(task)}</td>
                     <td className={`px-6 py-4 max-w-[380px] truncate font-mono text-sm ${textSecondary}`}>{expression}</td>
+                    <td className={`px-5 py-4 text-center whitespace-nowrap`}>
+                      {getTag(task) ? (
+                        <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium border ${isDark ? "bg-violet-500/10 text-violet-400 border-violet-500/30" : "bg-violet-50 text-violet-700 border-violet-200"}`}>{getTag(task)}</span>
+                      ) : (
+                        <span className={textMuted}>-</span>
+                      )}
+                    </td>
                     <td className="px-5 py-4 text-center">
                       {rating ? (
                         <span className={`inline-block px-2.5 py-0.5 rounded-md text-xs font-bold border ${isDark ? ratingColorDark(rating) : ratingColor(rating)}`}>{rating}</span>
@@ -374,6 +383,13 @@ export default function ResearchDashboard() {
                 <div className={`font-mono text-sm p-3 rounded-lg border ${border} ${surfaceAlt} ${textPrimary}`}>{getExpression(selectedTask)}</div>
               </div>
 
+              {getTag(selectedTask) && (
+                <div>
+                  <p className={`text-xs font-medium uppercase tracking-wider mb-1.5 ${textMuted}`}>Tag</p>
+                  <span className={`inline-block px-2.5 py-1 rounded-md text-sm font-medium border ${isDark ? "bg-violet-500/10 text-violet-400 border-violet-500/30" : "bg-violet-50 text-violet-700 border-violet-200"}`}>{getTag(selectedTask)}</span>
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 {statusBadge(selectedTask.status)}
                 {getRating(selectedTask) && (
@@ -414,10 +430,10 @@ export default function ResearchDashboard() {
                   <p className={`text-xs font-medium uppercase tracking-wider mb-2.5 ${textMuted}`}>WQ BRAIN Simulation</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                     {[
-                      { label: "WQ Sharpe", value: selectedTask.result.wq_brain.wq_sharpe.toFixed(2) },
-                      { label: "WQ Fitness", value: selectedTask.result.wq_brain.wq_fitness.toFixed(3) },
-                      { label: "WQ Returns", value: `${(selectedTask.result.wq_brain.wq_returns * 100).toFixed(1)}%` },
-                      { label: "WQ Rating", value: selectedTask.result.wq_brain.wq_rating },
+                      { label: "WQ Sharpe", value: selectedTask.result.wq_brain.wq_sharpe?.toFixed(2) ?? "—" },
+                      { label: "WQ Fitness", value: selectedTask.result.wq_brain.wq_fitness?.toFixed(3) ?? "—" },
+                      { label: "WQ Returns", value: selectedTask.result.wq_brain.wq_returns != null ? `${(selectedTask.result.wq_brain.wq_returns * 100).toFixed(1)}%` : "—" },
+                      { label: "WQ Rating", value: selectedTask.result.wq_brain.wq_rating ?? "—" },
                     ].map(({ label, value }) => (
                       <div key={label} className={`p-2.5 rounded-lg border ${border} ${surfaceAlt}`}>
                         <p className={`text-xs ${textMuted}`}>{label}</p>

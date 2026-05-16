@@ -1,14 +1,12 @@
-import { FlaskConical, Layers, BarChart3, LineChart, Code, LayoutDashboard } from "lucide-react";
+import { FlaskConical, Layers, BarChart3, LayoutDashboard } from "lucide-react";
 
-export type MainTab = "backtest" | "strategy" | "composite" | "comparison" | "paper" | "dashboard";
+export type MainTab = "backtest" | "composite" | "comparison" | "dashboard";
 
 export const TABS: { id: MainTab; label: string; icon: typeof FlaskConical; color: string }[] = [
   { id: "dashboard", label: "研究总览", icon: LayoutDashboard, color: "amber" },
   { id: "backtest", label: "单因子回测", icon: FlaskConical, color: "blue" },
-  { id: "strategy", label: "策略回测", icon: Code, color: "orange" },
   { id: "composite", label: "多因子组合", icon: Layers, color: "purple" },
   { id: "comparison", label: "因子对比", icon: BarChart3, color: "emerald" },
-  { id: "paper", label: "模拟盘", icon: LineChart, color: "teal" },
 ];
 
 interface Props {

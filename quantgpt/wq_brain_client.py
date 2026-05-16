@@ -83,29 +83,33 @@ class WQBrainClient:
             self._session.close()
             self._session = None
 
-    def authenticate(self) -> bool:
+    def authenticate(self, _max_retries: int = 5) -> bool:
         s = self._get_session()
-        r = s.post(
-            f"{API_BASE}/authentication",
-            auth=(self.email, self.password),
-        )
-        if r.status_code == 429:
-            retry = int(r.headers.get("Retry-After", "60"))
-            logger.info(f"WQ auth rate-limited, waiting {retry}s")
-            time.sleep(retry + 1)
-            return self.authenticate()
+        for attempt in range(_max_retries):
+            r = s.post(
+                f"{API_BASE}/authentication",
+                auth=(self.email, self.password),
+            )
+            if r.status_code == 429:
+                retry = int(r.headers.get("Retry-After", "60"))
+                logger.info(f"WQ auth rate-limited, waiting {retry}s (attempt {attempt + 1}/{_max_retries})")
+                time.sleep(retry + 1)
+                continue
 
-        if r.status_code not in (200, 201):
-            logger.error(f"WQ auth failed: HTTP {r.status_code}")
-            return False
+            if r.status_code not in (200, 201):
+                logger.error(f"WQ auth failed: HTTP {r.status_code}")
+                return False
 
-        data = r.json()
-        if "inquiry" in data:
-            logger.error("WQ auth requires biometric verification — log in via browser first")
-            return False
+            data = r.json()
+            if "inquiry" in data:
+                logger.error("WQ auth requires biometric verification — log in via browser first")
+                return False
 
-        logger.info("WQ BRAIN authenticated")
-        return True
+            logger.info("WQ BRAIN authenticated")
+            return True
+
+        logger.error(f"WQ auth failed: rate-limited {_max_retries} times")
+        return False
 
     def get_user_info(self) -> dict:
         r = self._get_session().get(f"{API_BASE}/users/self")
@@ -437,4 +441,25 @@ class WQBrainClient:
             "detail": f"submission polling timeout ({max_polls * interval}s), last status={status}, SC={sc_result}",
             "platform_status": "TIMEOUT",
         }
+
+    def delete_alpha(self, alpha_id: str) -> dict:
+        """Delete/retire an alpha from the platform."""
+        s = self._get_session()
+        r = s.delete(f"{API_BASE}/alphas/{alpha_id}")
+        if r.status_code in (200, 204):
+            return {"ok": True, "detail": f"Alpha {alpha_id} deleted"}
+        if r.status_code == 405:
+            r2 = s.patch(f"{API_BASE}/alphas/{alpha_id}", json={"hidden": True})
+            if r2.status_code in (200, 204):
+                return {"ok": True, "detail": f"Alpha {alpha_id} hidden via PATCH"}
+            return {"ok": False, "detail": f"DELETE 405, PATCH also failed: {r2.status_code} {r2.text[:200]}"}
+        return {"ok": False, "detail": f"DELETE failed: {r.status_code} {r.text[:200]}"}
+
+    def unhide_alpha(self, alpha_id: str) -> dict:
+        """Restore a hidden alpha."""
+        s = self._get_session()
+        r = s.patch(f"{API_BASE}/alphas/{alpha_id}", json={"hidden": False})
+        if r.status_code in (200, 204):
+            return {"ok": True, "detail": f"Alpha {alpha_id} restored"}
+        return {"ok": False, "detail": f"Unhide failed: {r.status_code} {r.text[:200]}"}
 

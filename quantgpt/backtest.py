@@ -284,7 +284,7 @@ def run_factor_backtest(
     # Use raw (pre-neutralization) factor values for IC — industry standard.
     # Neutralization is for portfolio construction only, not IC measurement.
     # Primary IC metric is Rank IC (Spearman) — more robust to outliers,
-    # consistent with industry convention (聚宽, Barra, ai-quant, etc.).
+    # consistent with industry convention (Barra, etc.).
     work_ic = work.copy()
     work_ic["factor_value"] = raw_factor_for_ic.reindex(work_ic.index)
     pearson_ic_series, rank_ic_series = _calc_ic_series(work_ic, holding_period)

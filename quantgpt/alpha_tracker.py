@@ -34,6 +34,7 @@ async def record_submitted_alpha(
     fitness: float | None = None,
     returns: float | None = None,
     turnover: float | None = None,
+    tag: str | None = None,
 ):
     from .db import _get_session_factory
     from .expression_parser import normalize_expression
@@ -60,6 +61,7 @@ async def record_submitted_alpha(
                 fitness=fitness,
                 returns=returns,
                 turnover=turnover,
+                tag=tag,
             )
             session.add(record)
             await session.commit()
