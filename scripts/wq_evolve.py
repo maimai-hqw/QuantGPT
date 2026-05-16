@@ -80,12 +80,29 @@ def to_wq_fastexpr(expr: str) -> str:
         out = _re.sub(rf"(?<![a-zA-Z_])(?<!ts_){_re.escape(local)}\b", wq, out)
     return out
 
-# Already-submitted alphas (orthogonality constraint to avoid SC failure)
+# Already-simulated alphas (orthogonality constraint to avoid SC failure / dups)
+# Kept in sync with WQ BRAIN platform listing. Top-of-list = most recent / highest fitness.
 EXISTING_ALPHAS = [
-    "-1 * rank(ts_av_diff(close, 10)) + rank(debt / enterprise_value)",  # F1 original
-    "-1 * rank(ts_decay_linear(close / vwap, 10))",                      # F2 vwap-decay
-    "-1 * rank(ts_decay_linear(returns * volume / adv20, 5))",           # F3 returns-volume
-    "-1 * rank(ts_av_diff(close, 20)) + rank(debt / enterprise_value)",  # V1b_w20 (just submitted)
+    # New A-grade family discovered 2026-05-13/14: regime-switch + sales/EV value + vwap-close microstructure
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.28,-zscore(ts_mean(returns,22)),0.55*zscore(log(sales/enterprise_value))-0.35*zscore(debt/enterprise_value)+0.65*zscore(ts_mean((vwap-close)/close,22))-0.15*zscore(ts_mean(volume/adv20,80))))",  # E5qb2bd0 F=1.30 SR=1.50 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.3,-zscore(ts_mean(returns,25)),0.5*zscore(log(sales/enterprise_value))-0.3*zscore(debt/enterprise_value)+0.6*zscore(ts_mean((vwap-close)/close,25))-0.2*zscore(rank(volume))))",  # O0nkVl9b F=1.18 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.25,-zscore(ts_mean(returns,25)),0.5*zscore(log(sales/enterprise_value))-0.3*zscore(debt/enterprise_value)+0.6*zscore(ts_mean((vwap-close)/close,25))-0.2*zscore(rank(volume))))",  # omnvpRgJ F=1.16 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.32,-zscore(ts_mean(returns,23)),0.55*zscore(log(sales/enterprise_value))-0.35*zscore(debt/enterprise_value)+0.6*zscore(ts_mean((vwap-close)/close,23))-0.15*zscore(ts_sum(volume/adv20,23))))",  # wp51Qj55 F=1.13 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.3,-zscore(ts_mean(returns,20)),0.5*zscore(log(sales/enterprise_value))-0.3*zscore(debt/enterprise_value)+0.6*zscore(ts_mean((vwap-close)/close,20))-0.2*zscore(rank(volume))))",  # XgkP3n65 F=1.12 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.34,-zscore(ts_mean(returns,22)),0.6*zscore(log(sales/enterprise_value))-0.4*zscore(debt/enterprise_value)+0.55*zscore(ts_decay_linear((vwap-close)/close,32))-0.25*zscore(ts_rank(volume,110))+0.2*zscore(ts_mean(log(high/low),25))))",  # xAeQnb1p F=1.03 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.35,-zscore(ts_sum(returns,20)),0.6*zscore(log(sales/enterprise_value))-0.4*zscore(debt/sales)+0.7*zscore(ts_mean((vwap-close)/close,30))-0.2*zscore(rank(volume))))",  # vR59PodA F=1.02 ✓
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.3,-zscore(ts_decay_linear(returns,25)),0.5*zscore(log(sales/enterprise_value))-0.3*zscore(debt/enterprise_value)+0.6*zscore(ts_decay_linear((vwap-close)/close,25))-0.2*zscore(ts_rank(volume,80))))",  # 3qE3OpJO F=1.01 ✓
+    # Reversal family (ACTIVE on platform)
+    "rank(-1 * ts_delta(close, 5) / close)",  # j2ndvlnO base, Fit 0.78 SR 1.50
+    "scale(rank(-ts_delta(close,5)/close) * rank(ts_decay_linear(volume/adv20,10)))",  # P0nXleYE variant template - ACTIVE on platform
+    # Pre-existing platform alphas (Fitness ~1.19, sales/cap value branch)
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.35,-zscore(ts_decay_linear(returns,20)),zscore(log(sales/cap))-0.5*zscore(debt/sales)+0.75*zscore(ts_decay_linear((vwap-close)/close,30))))",  # zq5MvXPd F=1.19
+    "scale(if_else(zscore(ts_std_dev(returns,60))>0.35,-zscore(ts_decay_linear(returns,20)),1.0*zscore(log(sales/cap))-0.5*zscore(debt/cap)+0.75*zscore(ts_decay_linear((vwap-close)/close,30))-0.4*zscore(ts_mean((high-low)/close,20))))",  # qMn8QzYA F=1.19
+    # Earlier baseline alphas (kept to prevent regression)
+    "-1 * rank(ts_av_diff(close, 10)) + rank(debt / enterprise_value)",  # F1
+    "-1 * rank(ts_decay_linear(close / vwap, 10))",                      # F2
+    "-1 * rank(ts_decay_linear(returns * volume / adv20, 5))",           # F3
+    "-1 * rank(ts_av_diff(close, 20)) + rank(debt / enterprise_value)",  # V1b_w20
 ]
 
 KB_DIR = ROOT / "docs" / "research_notes" / "knowledge"

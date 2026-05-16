@@ -26,7 +26,7 @@ SUBMIT_THRESHOLDS = {
 }
 
 _POLL_INTERVAL = 10
-_POLL_MAX_ATTEMPTS = 72
+_POLL_MAX_ATTEMPTS = 180
 _CONCURRENT_BACKOFF = 30
 _MAX_RETRIES = 5
 
@@ -240,7 +240,7 @@ class WQBrainClient:
 
             time.sleep(_POLL_INTERVAL)
 
-        return {"ok": False, "error": "WQ simulation polling timeout (12min)"}
+        return {"ok": False, "error": "WQ simulation polling timeout (30min)"}
 
     def _fetch_alpha(self, alpha_id: str) -> dict:
         r = self._get_session().get(f"{API_BASE}/alphas/{alpha_id}")
