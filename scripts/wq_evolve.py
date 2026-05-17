@@ -90,6 +90,7 @@ EXISTING_ALPHAS = [
     "trade_when(volume>adv20,rank(-ts_rank(returns,40))+0.5*rank(-cap/sales),-1)",  # A1nNQREW ACTIVE (decay=5) F=1.01 SR=1.85
     "group_zscore(-1 * ts_rank(close, 5), subindustry) + 0.4 * rank(-cap/sales)",  # JjnN8OrE ACTIVE (decay=5) F=1.03 SR=1.92
     "group_zscore(-ts_zscore(returns, 20), subindustry) + 0.3 * rank(-cap/sales)",  # 58LzegAX ACTIVE (decay=10) F=1.12 SR=2.12
+    "rank(vwap/close - 1) + 0.3 * rank(-cap/sales)",  # 6XRdV1qP ACTIVE (decay=10) F=1.10 SR=1.86 - vwap-close microstructure family
     # gn4/push round near-misses (Fit 0.96 LOW_FITNESS fail, but structurally similar - keep in orthog list)
     "group_zscore(-ts_decay_linear(returns,7),subindustry)+0.25*group_zscore(sales/cap,industry)+0.14*group_zscore(-debt/sales,industry)",  # 1YopNxPQ F=0.96
     # New A-grade family discovered 2026-05-13/14: regime-switch + sales/EV value + vwap-close microstructure
