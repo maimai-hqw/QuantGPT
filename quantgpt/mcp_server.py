@@ -699,6 +699,7 @@ async def wq_brain_batch_submit(
 async def wq_brain_submit_by_ids(
     alpha_ids: list[str],
     account: str = "primary",
+    names: dict[str, str] | None = None,
 ) -> str:
     """批量提交已模拟的 alpha（通过 alpha_id 直接提交，无需重新模拟）。
 
@@ -708,9 +709,13 @@ async def wq_brain_submit_by_ids(
     Args:
         alpha_ids: 要提交的 alpha_id 列表（最多 50 个）
         account: WQ 账号（提交只能用 'primary'）
+        names: 可选 {alpha_id: 人类可读名字} 映射。提交成功后会同步 PATCH
+               该 alpha 的 name 字段。建议格式 `<批次>_<方向>_<参数>`，
+               如 `B3_trade_when_rev_d5`。
 
     Returns:
         JSON with per-alpha result (ACTIVE/SC_FAIL/TIMEOUT) and summary.
+        若提供了 names 且命名成功，每条结果会附 "name_set" 字段。
     """
     from .wq_brain_client import get_client, is_configured as _wq_configured
 
@@ -724,7 +729,7 @@ async def wq_brain_submit_by_ids(
     task_id = await start_mcp_task(
         "wq_brain_submit_by_ids",
         None,
-        {"alpha_ids": alpha_ids, "account": account},
+        {"alpha_ids": alpha_ids, "account": account, "names": names},
     )
     _result = None
     _error_msg = None
@@ -736,7 +741,7 @@ async def wq_brain_submit_by_ids(
             _error_msg = "WQ BRAIN 认证失败"
             return json.dumps({"error": _error_msg})
 
-        _result = await asyncio.to_thread(run_submit_by_ids, client, alpha_ids)
+        _result = await asyncio.to_thread(run_submit_by_ids, client, alpha_ids, names=names)
         await asyncio.to_thread(client.close)
 
         return json.dumps(_result, ensure_ascii=False, indent=2, default=str)
@@ -745,6 +750,46 @@ async def wq_brain_submit_by_ids(
         return json.dumps({"error": _error_msg})
     finally:
         await complete_mcp_task(task_id, _result, _error_msg)
+
+
+@mcp.tool()
+async def wq_brain_rename_alphas(
+    names: dict[str, str],
+    account: str = "primary",
+) -> str:
+    """批量给 alpha 设置名字（PATCH WQ BRAIN 的 alpha.name 字段）。
+
+    用于给已 ACTIVE 的 anonymous alpha 命名，或修改已有名字。
+
+    Args:
+        names: {alpha_id: 名字} 映射。建议格式 `<批次>_<方向>_<参数>`，
+               例如 `B3_trade_when_rev_d5`、`B2_gn_rev_value`。
+        account: WQ 账号 (默认 'primary')
+
+    Returns:
+        JSON with per-alpha {ok, name, error?}.
+    """
+    from .wq_brain_client import get_client, is_configured as _wq_configured
+
+    if not _wq_configured(account):
+        return json.dumps({"error": f"WQ BRAIN account={account} 未配置"})
+    if not names:
+        return json.dumps({"error": "names 不能为空"})
+    if len(names) > 100:
+        return json.dumps({"error": f"names 数量 {len(names)} 超过上限 100"})
+
+    client = get_client(account)
+    if not await asyncio.to_thread(client.authenticate):
+        return json.dumps({"error": "WQ BRAIN 认证失败"})
+
+    results = {}
+    for aid, name in names.items():
+        r = await asyncio.to_thread(client.update_alpha_metadata, aid, name=name)
+        results[aid] = {"ok": r.get("ok", False), "name": name}
+        if not r.get("ok"):
+            results[aid]["error"] = r.get("error") or f"status={r.get('status_code')}"
+    await asyncio.to_thread(client.close)
+    return json.dumps({"total": len(names), "results": results}, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()

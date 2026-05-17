@@ -210,8 +210,13 @@ def run_submit_by_ids(
     on_progress: Callable[[int, int, str], None] | None = None,
     check_cancelled: Callable[[], bool] | None = None,
     on_each_done: Callable[[str, dict], None] | None = None,
+    names: dict[str, str] | None = None,
 ) -> dict:
-    """Submit a list of already-simulated alphas. Returns summary dict."""
+    """Submit a list of already-simulated alphas. Returns summary dict.
+
+    If `names` map is provided ({alpha_id: human_name}), PATCH the alpha's
+    name on the platform after a successful submission (final_status=ACTIVE).
+    """
     results: dict[str, dict] = {}
     active = sc_fail = timeout = 0
 
@@ -239,6 +244,11 @@ def run_submit_by_ids(
         if result.get("ok"):
             active += 1
             entry["final_status"] = "ACTIVE"
+            if names and alpha_id in names:
+                meta = client.update_alpha_metadata(alpha_id, name=names[alpha_id])
+                entry["name_set"] = names[alpha_id] if meta.get("ok") else None
+                if not meta.get("ok"):
+                    entry["name_error"] = meta.get("error") or f"status={meta.get('status_code')}"
         elif "SC FAIL" in result.get("detail", ""):
             sc_fail += 1
             entry["final_status"] = "SC_FAIL"
