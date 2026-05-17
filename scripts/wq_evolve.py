@@ -83,10 +83,13 @@ def to_wq_fastexpr(expr: str) -> str:
 # Already-simulated alphas (orthogonality constraint to avoid SC failure / dups)
 # Kept in sync with WQ BRAIN platform listing. Top-of-list = most recent / highest fitness.
 EXISTING_ALPHAS = [
-    # ACTIVE on platform 2026-05-15/16 (codex gpt-5.5 xhigh discoveries)
+    # ACTIVE on platform 2026-05-15/17 (codex gpt-5.5 xhigh + decay=5/10 discoveries)
     "scale(group_zscore(-0.5*ts_sum(returns,4)-0.3*ts_mean(returns,16)-0.2*ts_av_diff(close,12),subindustry)+0.28*group_zscore(log(sales/enterprise_value),subindustry))",  # 6XRRLpKG ACTIVE F=1.18 SR=2.01
     "scale(0.42*zscore(ts_rank(close,140)-ts_rank(close,45))+0.28*zscore(ts_delta(close,20)/close-ts_delta(close,80)/close)+0.18*zscore(ts_av_diff(close,60)))",  # 3qEz7KRN ACTIVE F=1.02 SR=1.90
     "-1 * zscore(ts_decay_linear(ts_mean(returns, 5), 3))",  # P0nXleYE ACTIVE F=1.14 SR=1.52
+    "trade_when(volume>adv20,rank(-ts_rank(returns,40))+0.5*rank(-cap/sales),-1)",  # A1nNQREW ACTIVE (decay=5) F=1.01 SR=1.85
+    "group_zscore(-1 * ts_rank(close, 5), subindustry) + 0.4 * rank(-cap/sales)",  # JjnN8OrE ACTIVE (decay=5) F=1.03 SR=1.92
+    "group_zscore(-ts_zscore(returns, 20), subindustry) + 0.3 * rank(-cap/sales)",  # 58LzegAX ACTIVE (decay=10) F=1.12 SR=2.12
     # gn4/push round near-misses (Fit 0.96 LOW_FITNESS fail, but structurally similar - keep in orthog list)
     "group_zscore(-ts_decay_linear(returns,7),subindustry)+0.25*group_zscore(sales/cap,industry)+0.14*group_zscore(-debt/sales,industry)",  # 1YopNxPQ F=0.96
     # New A-grade family discovered 2026-05-13/14: regime-switch + sales/EV value + vwap-close microstructure
