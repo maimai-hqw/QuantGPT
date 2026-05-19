@@ -92,6 +92,7 @@ EXISTING_ALPHAS = [
     "group_zscore(-ts_zscore(returns, 20), subindustry) + 0.3 * rank(-cap/sales)",  # 58LzegAX ACTIVE (decay=10) F=1.12 SR=2.12
     "rank(vwap/close - 1) + 0.3 * rank(-cap/sales)",  # 6XRdV1qP ACTIVE (decay=10) F=1.10 SR=1.86 - vwap-close microstructure family
     "zscore(ts_delta(adv20,60)/adv20)+0.35*zscore(ts_corr(returns,volume,40))+0.25*zscore(sales/cap)",  # wp5ol2VQ ACTIVE (decay=10) F=1.17 SR=1.35 turn=9.7% - liquidity momentum family
+    "scale(-zscore(ts_std_dev(log(volume/adv20),60))+0.4*zscore(sales/cap))",  # 3qE5PPeN ACTIVE (decay=5) F=1.37 SR=1.34 turn=6.0% - log-volume variance / low-attention long family
     # Daily intraday O→C/H→C mean-revert family — SC=0.80-0.86 撞 6XRdV1qP (2026-05-18 实测)
     "rank(-(close - open)/close) + 0.3 * rank(-cap/sales)",  # kqngxNak F=1.39 SR=2.04 SC=0.86 (close-open intraday rev)
     "rank(-returns * volume / adv20) + 0.3*rank(-cap/sales)",  # omnE9R8b F=1.31 SR=1.95 SC=0.83 (vol-weighted returns rev)
@@ -139,9 +140,10 @@ WQ_SYSTEM_PROMPT = """你是 WorldQuant BRAIN 因子专家。生成的表达式�
 - sign_power（必须写 signed_power）
 - product（必须写 ts_product）
 - where（必须写 if_else）
-- **ts_shift, ts_min, ts_max, ts_ir, ts_skewness, ts_cov（用户 WQ 账号权限拒绝）**
+- **ts_shift, ts_min, ts_max, ts_ir, ts_skewness, ts_cov, ts_argmax, ts_argmin, ts_kurtosis（用户 WQ 账号权限拒绝）**
   - 需要 lag 时用 ts_delta(x, N) / x 替代（不要 ts_shift）
-  - 需要极值时用 ts_argmax/ts_argmin 或 ts_rank 比较替代
+  - 需要极值距离时用 zscore((close - ts_mean(close,N)) / ts_std_dev(close,N)) 替代
+  - 需要肥尾/偏度时用 signed_power(x, 2/3) + ts_mean 拼凑（不要 ts_kurtosis/ts_skewness）
 
 ## ✅ 允许的变量（仅这些）
 价量: open, high, low, close, volume, vwap, returns
