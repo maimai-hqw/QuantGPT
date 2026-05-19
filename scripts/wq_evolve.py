@@ -92,6 +92,10 @@ EXISTING_ALPHAS = [
     "group_zscore(-ts_zscore(returns, 20), subindustry) + 0.3 * rank(-cap/sales)",  # 58LzegAX ACTIVE (decay=10) F=1.12 SR=2.12
     "rank(vwap/close - 1) + 0.3 * rank(-cap/sales)",  # 6XRdV1qP ACTIVE (decay=10) F=1.10 SR=1.86 - vwap-close microstructure family
     "zscore(ts_delta(adv20,60)/adv20)+0.35*zscore(ts_corr(returns,volume,40))+0.25*zscore(sales/cap)",  # wp5ol2VQ ACTIVE (decay=10) F=1.17 SR=1.35 turn=9.7% - liquidity momentum family
+    # Daily intraday O→C/H→C mean-revert family — SC=0.80-0.86 撞 6XRdV1qP (2026-05-18 实测)
+    "rank(-(close - open)/close) + 0.3 * rank(-cap/sales)",  # kqngxNak F=1.39 SR=2.04 SC=0.86 (close-open intraday rev)
+    "rank(-returns * volume / adv20) + 0.3*rank(-cap/sales)",  # omnE9R8b F=1.31 SR=1.95 SC=0.83 (vol-weighted returns rev)
+    "trade_when(ts_mean(volume,5)>ts_mean(volume,60),rank(-(close-open)/close)+0.5*rank(-cap/sales),-1)",  # omnWm6EE F=1.18 SR=1.57 SC=0.80 (trade_when + close-open)
     # gn4/push round near-misses (Fit 0.96 LOW_FITNESS fail, but structurally similar - keep in orthog list)
     "group_zscore(-ts_decay_linear(returns,7),subindustry)+0.25*group_zscore(sales/cap,industry)+0.14*group_zscore(-debt/sales,industry)",  # 1YopNxPQ F=0.96
     # New A-grade family discovered 2026-05-13/14: regime-switch + sales/EV value + vwap-close microstructure
