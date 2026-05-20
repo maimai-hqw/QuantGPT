@@ -93,10 +93,15 @@ EXISTING_ALPHAS = [
     "rank(vwap/close - 1) + 0.3 * rank(-cap/sales)",  # 6XRdV1qP ACTIVE (decay=10) F=1.10 SR=1.86 - vwap-close microstructure family
     "zscore(ts_delta(adv20,60)/adv20)+0.35*zscore(ts_corr(returns,volume,40))+0.25*zscore(sales/cap)",  # wp5ol2VQ ACTIVE (decay=10) F=1.17 SR=1.35 turn=9.7% - liquidity momentum family
     "scale(-zscore(ts_std_dev(log(volume/adv20),60))+0.4*zscore(sales/cap))",  # 3qE5PPeN ACTIVE (decay=5) F=1.37 SR=1.34 turn=6.0% - log-volume variance / low-attention long family
-    # Daily intraday O→C/H→C mean-revert family — SC=0.80-0.86 撞 6XRdV1qP (2026-05-18 实测)
+    # Daily intraday OHLC mean-revert family — SC=0.80-0.96 撞 6XRdV1qP (2026-05-18/19 实测，整族标定)
     "rank(-(close - open)/close) + 0.3 * rank(-cap/sales)",  # kqngxNak F=1.39 SR=2.04 SC=0.86 (close-open intraday rev)
     "rank(-returns * volume / adv20) + 0.3*rank(-cap/sales)",  # omnE9R8b F=1.31 SR=1.95 SC=0.83 (vol-weighted returns rev)
     "trade_when(ts_mean(volume,5)>ts_mean(volume,60),rank(-(close-open)/close)+0.5*rank(-cap/sales),-1)",  # omnWm6EE F=1.18 SR=1.57 SC=0.80 (trade_when + close-open)
+    "rank((high+low)/2/close - 1) + 0.3*rank(-cap/sales)",  # A1nV6oZQ F=1.26 SR=1.95 SC=0.96 (midpoint vs close - 几乎等于 vwap)
+    "rank(-(close-open)/(high-low)) + 0.3*rank(-cap/sales)",  # 58LEqMKo F=1.24 SR=1.97 SC=0.87 (bar shape)
+    # B11 family — log-volume variance ACTIVE — 同信号源 SC 撞自家 3qE5PPeN
+    "scale(-zscore(ts_std_dev(log(volume/adv20),60))+0.5*zscore(sales/cap))",  # blNnn2Or F=1.49 SR=1.41 - tilt 0.5 variant (SC撞 3qE5PPeN)
+    "scale(-zscore(ts_std_dev(log(volume/adv20),60))+0.7*zscore(sales/cap))",  # RRNKKElz F=1.67 SR=1.50 - tilt 0.7 variant (SC撞 3qE5PPeN)
     # gn4/push round near-misses (Fit 0.96 LOW_FITNESS fail, but structurally similar - keep in orthog list)
     "group_zscore(-ts_decay_linear(returns,7),subindustry)+0.25*group_zscore(sales/cap,industry)+0.14*group_zscore(-debt/sales,industry)",  # 1YopNxPQ F=0.96
     # New A-grade family discovered 2026-05-13/14: regime-switch + sales/EV value + vwap-close microstructure
