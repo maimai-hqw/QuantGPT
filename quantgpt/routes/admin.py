@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import create_admin_token, create_api_key_for_user, require_admin
+from ..auth import require_admin
 from ..db import get_db
 from ..models import ApiKey, Feedback, Task, User
 
@@ -26,14 +26,7 @@ class AdminLoginRequest(BaseModel):
 
 @router.post("/login")
 async def admin_login(req: AdminLoginRequest):
-    """Authenticate admin with password, return JWT."""
-    expected = os.environ.get("QUANTGPT_ADMIN_PASSWORD", "")
-    if not expected:
-        raise HTTPException(status_code=503, detail="管理员密码未配置")
-    if not hmac.compare_digest(req.password, expected):
-        raise HTTPException(status_code=401, detail="密码错误")
-    token = create_admin_token()
-    return {"token": token}
+    return {"token": "local-admin"}
 
 
 @router.get("/overview", dependencies=[Depends(require_admin)])
@@ -427,13 +420,7 @@ class CreateApiKeyRequest(BaseModel):
 
 @router.post("/api-keys", dependencies=[Depends(require_admin)])
 async def admin_create_api_key(req: CreateApiKeyRequest, db: AsyncSession = Depends(get_db)):
-    """Generate an API Key for a user (by email). Returns the raw key once — store it."""
-    result = await db.execute(select(User).where(User.email == req.user_email))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail=f"用户 {req.user_email} 不存在")
-    raw_key = await create_api_key_for_user(user.id, req.name, db)
-    return {"api_key": raw_key, "user_email": user.email, "user_id": str(user.id)}
+    return {"detail": "API keys not available — auth is disabled"}
 
 
 @router.get("/api-keys", dependencies=[Depends(require_admin)])

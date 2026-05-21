@@ -3,7 +3,6 @@ import type { Task } from "./types/backtest";
 import { useBacktest } from "./hooks/useBacktest";
 import { useTaskHistory } from "./hooks/useTaskHistory";
 import { useSession } from "./hooks/useSession";
-import { useAuth } from "./contexts/AuthContext";
 import { useColorMode } from "./contexts/ColorModeContext";
 import Header from "./components/Header";
 import BacktestForm from "./components/BacktestForm";
@@ -28,7 +27,6 @@ function getTabFromHash(): MainTab {
 }
 
 export default function App() {
-  const { isGuest } = useAuth();
   const { isDark } = useColorMode();
   const [activeTab, setActiveTab] = useState<MainTab>(getTabFromHash);
   const [sidebarTab, setSidebarTab] = useState<"sessions" | "factors">("sessions");
@@ -50,13 +48,11 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  // Load saved expressions on mount (skip for guests)
   useEffect(() => {
-    if (isGuest) return;
     fetchFactors().then((factors) => {
       setSavedExpressions(new Set(factors.map((f) => f.expression)));
     }).catch(() => {});
-  }, [factorLibKey, isGuest]);
+  }, [factorLibKey]);
 
   const {
     sessions,
@@ -212,10 +208,10 @@ export default function App() {
               {showResults && activeTask.result && (
                 <ResultsDashboard
                   result={activeTask.result}
-                  onSaveFactor={isGuest ? undefined : handleSaveFactor}
+                  onSaveFactor={handleSaveFactor}
                   isSaving={saving}
                   isSaved={savedExpressions.has(activeTask.result.params.expression)}
-                  iterationSlot={isGuest ? undefined :
+                  iterationSlot={
                     <IterationPanel
                       parentTaskId={activeTask.task_id}
                       iterationTask={iterationTask}
@@ -243,8 +239,7 @@ export default function App() {
 
         </main>
 
-        {/* Sidebar — visible on backtest and strategy tabs for logged-in users */}
-        {activeTab === "backtest" && !isGuest && (
+        {activeTab === "backtest" && (
           <AppSidebar
             sidebarTab={sidebarTab}
             onSidebarTabChange={setSidebarTab}

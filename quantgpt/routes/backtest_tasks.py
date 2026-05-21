@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import GUEST_USER_ID, decode_token, get_current_user, get_optional_user
+from ..auth import GUEST_USER_ID, get_current_user, get_optional_user
 from ..db import get_db
 from ..expression_parser import parse_expression
 from ..iteration import compute_factor_score
@@ -57,12 +57,10 @@ from ..task_store import (
     check_rate_limit,
     cleanup_reports,
     cleanup_tasks,
-    create_sse_ticket,
     persist_task_to_db,
     sanitize_task_response,
     tasks,
     tasks_lock,
-    validate_sse_ticket,
 )
 
 logger = logging.getLogger(__name__)
@@ -250,6 +248,14 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
             except Exception as e:
                 logger.warning(f"[{task_id}] anti-overfit analysis failed: {e}")
 
+        adversarial_result = None
+        if factor_df is not None and len(factor_df) > 100:
+            try:
+                from ..adversarial_validator import run_adversarial_validation
+                adversarial_result = run_adversarial_validation(factor_df, req.holding_period)
+            except Exception as e:
+                logger.warning(f"[{task_id}] adversarial validation failed: {e}")
+
         check_cancelled(task_id)
         task["status"] = "generating_report"
         bm_returns = None
@@ -287,6 +293,8 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
             logger.warning(f"[{task_id}] interpretation failed: {e}")
 
         ao_score_val = anti_overfit_result.get("score") if anti_overfit_result else None
+        factor_df = result.get("_factor_df")
+        data_days = len(factor_df["trade_date"].unique()) if factor_df is not None else 0
         scoring = compute_factor_score(
             backtest_summary={
                 "long_short_sharpe": result["long_short_sharpe"],
@@ -296,13 +304,29 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
                 "rank_ic_mean": result.get("rank_ic_mean", 0),
                 "ic_ir": result.get("ic_ir", 0),
                 "ic_win_rate": result.get("ic_win_rate", 0),
-                "wq_fitness": result.get("wq_fitness", 0),
+                "turnover": result.get("turnover", 0),
             },
             report_metrics=report_result["metrics"],
             anti_overfit_score=ao_score_val,
+            data_days=data_days,
         )
         interpretation["rating"] = scoring["grade"]
         interpretation["rating_reason"] = f"综合评分 {scoring['score']}/100"
+
+        cloud_validation = None
+        if scoring["grade"] == "A" and scoring.get("cloud_predicted_pass") and factor_df is not None:
+            task["status"] = "uploading_cloud"
+            try:
+                from ..cloud_client import auto_upload_to_cloud
+                cloud_validation = auto_upload_to_cloud(
+                    expression=expression,
+                    universe=req.universe,
+                    factor_df=result["_factor_df"],
+                    claimed_ic_mean=result.get("ic_mean"),
+                    claimed_ic_ir=result.get("ic_ir"),
+                )
+            except Exception as e:
+                logger.warning(f"[{task_id}] Cloud auto-upload failed: {e}")
 
         task["status"] = "completed"
 
@@ -344,8 +368,10 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
             },
             "wq_brain": result.get("wq_brain", {}),
             "anti_overfit": anti_overfit_result,
+            "adversarial": adversarial_result,
             "scoring": scoring,
             "interpretation": interpretation,
+            "cloud_validation": cloud_validation,
             "stock_factor_data": result.get("_stock_factor_data"),
             "nav_series": nav_series,
             "params": {
@@ -388,12 +414,10 @@ def _run_backtest_task(task_id: str, req: AutoBacktestRequest, user_id: str):
 @router.get("/api/v1/health", summary="健康检查")
 def health():
     """检查服务状态，返回当前活跃任务数和总任务数。不需要认证。"""
-    from ..auth import is_auth_disabled
     return {
         "status": "ok",
         "active_tasks": active_task_count(),
         "total_tasks": len(tasks),
-        "auth_disabled": is_auth_disabled(),
     }
 
 
@@ -660,36 +684,20 @@ async def get_task(
 
 
 @router.post("/api/v1/tasks/{task_id}/sse-ticket")
-async def create_ticket(task_id: str, user: User = Depends(get_current_user)):
-    """Create a short-lived, single-use ticket for SSE stream authentication."""
+async def create_ticket(task_id: str):
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.get("user_id") != str(user.id):
-        raise HTTPException(status_code=404, detail="Task not found")
-    ticket = create_sse_ticket(task_id, str(user.id))
-    return {"ticket": ticket}
+    return {"ticket": "noop"}
 
 
 @router.get("/api/v1/tasks/{task_id}/stream")
 async def stream_task(task_id: str, request: Request):
     import quantgpt.task_store as _ts
 
-    from ..auth import is_auth_disabled
-
     task = tasks.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    if not is_auth_disabled():
-        ticket = request.query_params.get("ticket")
-        if not ticket:
-            raise HTTPException(status_code=401, detail="Missing SSE ticket")
-        user_id = validate_sse_ticket(ticket, task_id)
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid or expired SSE ticket")
-        if task.get("user_id") != user_id:
-            raise HTTPException(status_code=404, detail="Task not found")
 
     with _ts.sse_lock:
         if _ts.active_sse_count >= MAX_SSE_CONNECTIONS:

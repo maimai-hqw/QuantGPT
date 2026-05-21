@@ -224,7 +224,6 @@ async def run_backtest(
                 "ic_ir": result.get("ic_ir", 0),
                 "ic_win_rate": result.get("ic_win_rate", 0),
                 "turnover": result.get("turnover", 0),
-                "wq_fitness": result.get("wq_fitness", 0),
                 "cost_adjusted": result.get("cost_adjusted", False),
                 "cost_rate": result.get("cost_rate", 0),
                 "total_cost_drag": result.get("total_cost_drag", 0),
@@ -342,7 +341,6 @@ async def score_factor(
                 "monotonicity": result["monotonicity_score"],
                 "top_group_sharpe": result.get("top_group_sharpe", 0),
                 "turnover": result.get("turnover", 0),
-                "wq_fitness": result.get("wq_fitness", 0),
                 "sharpe": report_result["metrics"].get("sharpe", 0),
                 "max_drawdown": report_result["metrics"].get("max_drawdown", 0),
             },
@@ -921,6 +919,98 @@ async def wq_brain_finalize_submissions(
         return json.dumps({"error": f"Finalize failed: {e}"})
     finally:
         await complete_mcp_task(task_id, _result, _error_msg)
+
+
+@mcp.tool()
+async def compute_factor_values(
+    expression: str,
+    universe: str = "csi500",
+    start_date: str = "",
+    end_date: str = "",
+) -> str:
+    """计算因子截面值 — 返回每个交易日所有股票的因子得分。
+
+    用于下游组合构建、因子库上传或外部分析。
+    输出格式: {trading_days, data: [{date, values: {symbol: score}, count}]}
+
+    Args:
+        expression: 因子表达式（如 rank(ts_mean(close/open, 10))）
+        universe: 股票池（hs300 / csi500 / csi1000 / csi2000）
+        start_date: 起始日期 YYYY-MM-DD（默认 end_date 前 365 天）
+        end_date: 截止日期 YYYY-MM-DD（默认今天）
+    """
+    import numpy as np
+
+    from .backtest import api_context
+    from .expression_parser import parse_expression
+    from .market_data import MarketDataFetcher, get_universe
+
+    try:
+        factor_fn = parse_expression(expression)
+    except Exception as e:
+        return json.dumps({"error": f"Invalid expression: {e}"}, ensure_ascii=False)
+
+    def _compute():
+        from datetime import date, timedelta
+
+        with api_context():
+            fetcher = MarketDataFetcher()
+            stocks = get_universe(universe)
+            if not stocks:
+                return {"error": f"Empty universe: {universe}"}
+
+            end_dt = end_date or date.today().isoformat()
+            if not start_date:
+                start_dt = (date.fromisoformat(end_dt) - timedelta(days=365)).isoformat()
+            else:
+                start_dt = start_date
+
+            d_start = date.fromisoformat(start_dt)
+            d_end = date.fromisoformat(end_dt)
+            if (d_end - d_start).days > 750:
+                return {"error": "Date range too large (max 750 days)"}
+
+            extra_days = 260
+            fetch_start = (d_start - timedelta(days=extra_days)).isoformat()
+
+            df = fetcher.fetch_stocks(stocks, fetch_start, end_dt)
+            if df is None or df.empty:
+                return {"error": "No market data available for this universe/date range"}
+
+            try:
+                factor_values = factor_fn(df)
+            except Exception as e:
+                return {"error": f"Expression evaluation failed: {e}"}
+
+            df["factor_value"] = factor_values
+            result_df = df[df["trade_date"] >= start_dt][["trade_date", "stock_code", "factor_value"]].copy()
+            result_df = result_df.dropna(subset=["factor_value"])
+
+            dates_data = []
+            for trade_date, group in result_df.groupby("trade_date"):
+                values = {}
+                for _, row in group.iterrows():
+                    val = row["factor_value"]
+                    if np.isfinite(val):
+                        values[row["stock_code"]] = round(float(val), 6)
+                if values:
+                    dates_data.append({
+                        "date": str(trade_date),
+                        "values": values,
+                        "count": len(values),
+                    })
+
+            return {
+                "expression": expression,
+                "universe": universe,
+                "start_date": start_dt,
+                "end_date": end_dt,
+                "trading_days": len(dates_data),
+                "data": dates_data,
+            }
+
+    result = await asyncio.to_thread(_compute)
+    return json.dumps(result, ensure_ascii=False, default=str)
 
 
 # Operator documentation fallback

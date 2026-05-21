@@ -121,28 +121,21 @@ class TestWQBrainStatusEndpoint:
 
 
 class TestWQBrainSubmitEndpoint:
-    async def test_submit_requires_auth(self, client):
-        resp = await client.post("/api/v1/wq-brain/submit", json={
-            "expression": "rank(close)",
-            "tag": "test-agent",
-        })
-        assert resp.status_code in (401, 403)
-
-    async def test_submit_returns_503_when_not_configured(self, client, test_user, auth_headers):
+    async def test_submit_returns_503_when_not_configured(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "", "WQ_BRAIN_PASSWORD": ""}, clear=False):
             resp = await client.post("/api/v1/wq-brain/submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 503
 
-    async def test_submit_creates_task(self, client, test_user, auth_headers):
+    async def test_submit_creates_task(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}, clear=False):
             with patch("quantgpt.routes.wq_brain._run_wq_brain_task"):
                 resp = await client.post("/api/v1/wq-brain/submit", json={
                     "expression": "rank(close)",
                     "tag": "test-agent",
-                }, headers=auth_headers)
+                })
                 assert resp.status_code == 202
                 data = resp.json()
                 assert "task_id" in data
@@ -150,12 +143,8 @@ class TestWQBrainSubmitEndpoint:
 
 
 class TestSubmittedAlphasEndpoint:
-    async def test_list_requires_auth(self, client):
+    async def test_list_returns_empty(self, client):
         resp = await client.get("/api/v1/wq-brain/submitted-alphas")
-        assert resp.status_code in (401, 403)
-
-    async def test_list_returns_empty(self, client, test_user, auth_headers):
-        resp = await client.get("/api/v1/wq-brain/submitted-alphas", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 0
@@ -163,11 +152,7 @@ class TestSubmittedAlphasEndpoint:
 
 
 class TestSubmitAlphaEndpoint:
-    async def test_submit_alpha_requires_auth(self, client):
-        resp = await client.post("/api/v1/wq-brain/fake-task/submit-alpha")
-        assert resp.status_code in (401, 403)
-
-    async def test_submit_alpha_task_not_found(self, client, test_user, auth_headers):
+    async def test_submit_alpha_task_not_found(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}, clear=False):
-            resp = await client.post("/api/v1/wq-brain/nonexistent/submit-alpha", headers=auth_headers)
+            resp = await client.post("/api/v1/wq-brain/nonexistent/submit-alpha")
             assert resp.status_code == 404

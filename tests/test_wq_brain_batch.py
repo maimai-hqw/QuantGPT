@@ -9,62 +9,55 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestBatchSubmitValidation:
-    async def test_requires_auth(self, client):
-        resp = await client.post("/api/v1/wq-brain/batch-submit", json={
-            "expression": "rank(close)",
-            "tag": "test-agent",
-        })
-        assert resp.status_code in (401, 403)
-
-    async def test_returns_503_when_not_configured(self, client, test_user, auth_headers):
+    async def test_returns_503_when_not_configured(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "", "WQ_BRAIN_PASSWORD": ""}, clear=False):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 503
 
-    async def test_rejects_invalid_region(self, client, test_user, auth_headers):
+    async def test_rejects_invalid_region(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
                 "regions": ["INVALID"],
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 400
             assert "region" in resp.json()["detail"].lower()
 
-    async def test_rejects_invalid_universe(self, client, test_user, auth_headers):
+    async def test_rejects_invalid_universe(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
                 "universes": ["INVALID"],
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 400
             assert "universe" in resp.json()["detail"].lower()
 
-    async def test_rejects_invalid_neutralization(self, client, test_user, auth_headers):
+    async def test_rejects_invalid_neutralization(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
                 "neutralizations": ["BOGUS"],
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 400
             assert "neutralization" in resp.json()["detail"].lower()
 
-    async def test_rejects_invalid_delay(self, client, test_user, auth_headers):
+    async def test_rejects_invalid_delay(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
                 "tag": "test-agent",
                 "delays": [5],
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 400
             assert "delay" in resp.json()["detail"].lower()
 
-    async def test_rejects_too_many_combinations(self, client, test_user, auth_headers):
+    async def test_rejects_too_many_combinations(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                 "expression": "rank(close)",
@@ -73,26 +66,26 @@ class TestBatchSubmitValidation:
                 "delays": [0, 1],
                 "universes": ["TOP3000", "TOP1000", "TOP500", "TOP200"],
                 "neutralizations": ["MARKET", "SUBINDUSTRY", "INDUSTRY", "SECTOR", "NONE"],
-            }, headers=auth_headers)
+            })
             assert resp.status_code == 400
             assert "组合数" in resp.json()["detail"]
 
 
 class TestBatchSubmitCreatesTask:
-    async def test_creates_task_with_defaults(self, client, test_user, auth_headers):
+    async def test_creates_task_with_defaults(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             with patch("quantgpt.routes.wq_brain_batch._run_batch_task"):
                 resp = await client.post("/api/v1/wq-brain/batch-submit", json={
                     "expression": "rank(close)",
                     "tag": "test-agent",
-                }, headers=auth_headers)
+                })
                 assert resp.status_code == 202
                 data = resp.json()
                 assert "task_id" in data
                 assert data["status"] == "pending"
                 assert data["total_combinations"] == 1
 
-    async def test_creates_task_with_sweep(self, client, test_user, auth_headers):
+    async def test_creates_task_with_sweep(self, client):
         with patch.dict(os.environ, {"WQ_BRAIN_EMAIL": "a@b.com", "WQ_BRAIN_PASSWORD": "pw"}):
             with patch("quantgpt.routes.wq_brain_batch._run_batch_task"):
                 resp = await client.post("/api/v1/wq-brain/batch-submit", json={
@@ -102,7 +95,7 @@ class TestBatchSubmitCreatesTask:
                     "delays": [0, 1],
                     "universes": ["TOP3000"],
                     "neutralizations": ["SUBINDUSTRY", "MARKET"],
-                }, headers=auth_headers)
+                })
                 assert resp.status_code == 202
                 data = resp.json()
                 assert data["total_combinations"] == 1 * 2 * 1 * 2

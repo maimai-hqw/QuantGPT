@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from quantgpt.auth import _DEV_USER_ID
 from quantgpt.task_store import tasks, tasks_lock
 
 pytestmark = pytest.mark.asyncio
@@ -23,11 +24,11 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert "active_tasks" in data
-        assert "auth_disabled" in data
+        assert "total_tasks" in data
 
 
 class TestTaskStats:
-    async def test_returns_stats(self, client, test_user, auth_headers):
+    async def test_returns_stats(self, client, auth_headers):
         resp = await client.get("/api/v1/tasks/stats", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
@@ -35,8 +36,8 @@ class TestTaskStats:
         assert "completed" in data
         assert "running" in data
 
-    async def test_with_tasks_present(self, client, test_user, auth_headers):
-        uid = str(test_user.id)
+    async def test_with_tasks_present(self, client, auth_headers):
+        uid = str(_DEV_USER_ID)
         with tasks_lock:
             tasks["t1"] = {"task_id": "t1", "user_id": uid, "status": "running", "created_at": time.time()}
             tasks["t2"] = {"task_id": "t2", "user_id": uid, "status": "completed", "created_at": time.time()}
@@ -47,17 +48,17 @@ class TestTaskStats:
 
 
 class TestListTasks:
-    async def test_empty_list(self, client, test_user, auth_headers):
+    async def test_empty_list(self, client, auth_headers):
         resp = await client.get("/api/v1/tasks", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["tasks"] == []
 
-    async def test_lists_user_tasks(self, client, test_user, auth_headers, db_session):
+    async def test_lists_user_tasks(self, client, auth_headers, db_session):
         from quantgpt.models import Task as TaskModel
         t = TaskModel(
             id="test-task-1",
-            user_id=test_user.id,
+            user_id=_DEV_USER_ID,
             status="completed",
             task_type="backtest",
             expression="rank(close)",
@@ -73,11 +74,11 @@ class TestListTasks:
 
 
 class TestGetTask:
-    async def test_get_existing_task(self, client, test_user, auth_headers, db_session):
+    async def test_get_existing_task(self, client, auth_headers, db_session):
         from quantgpt.models import Task as TaskModel
         t = TaskModel(
             id="detail-task-1",
-            user_id=test_user.id,
+            user_id=_DEV_USER_ID,
             status="completed",
             task_type="backtest",
             expression="rank(volume)",
@@ -92,14 +93,14 @@ class TestGetTask:
         assert data["task_id"] == "detail-task-1"
         assert data["expression"] == "rank(volume)"
 
-    async def test_get_nonexistent_task(self, client, test_user, auth_headers):
+    async def test_get_nonexistent_task(self, client, auth_headers):
         resp = await client.get("/api/v1/tasks/nonexistent", headers=auth_headers)
         assert resp.status_code == 404
 
 
 class TestCancelTask:
-    async def test_cancel_running_task(self, client, test_user, auth_headers):
-        uid = str(test_user.id)
+    async def test_cancel_running_task(self, client, auth_headers):
+        uid = str(_DEV_USER_ID)
         with tasks_lock:
             tasks["cancel-me"] = {
                 "task_id": "cancel-me",
@@ -112,12 +113,12 @@ class TestCancelTask:
         assert resp.status_code == 200
         assert tasks["cancel-me"]["status"] == "cancelled"
 
-    async def test_cancel_nonexistent_task(self, client, test_user, auth_headers):
+    async def test_cancel_nonexistent_task(self, client, auth_headers):
         resp = await client.post("/api/v1/tasks/nonexistent/cancel", headers=auth_headers)
         assert resp.status_code == 404
 
-    async def test_cancel_completed_task_fails(self, client, test_user, auth_headers):
-        uid = str(test_user.id)
+    async def test_cancel_completed_task_fails(self, client, auth_headers):
+        uid = str(_DEV_USER_ID)
         with tasks_lock:
             tasks["done-task"] = {
                 "task_id": "done-task",
@@ -131,20 +132,20 @@ class TestCancelTask:
 
 
 class TestAutoBacktestValidation:
-    async def test_empty_prompt_rejected(self, client, test_user, auth_headers):
+    async def test_empty_prompt_rejected(self, client, auth_headers):
         resp = await client.post("/api/v1/auto_backtest", json={
             "prompt": "",
         }, headers=auth_headers)
         assert resp.status_code == 422
 
-    async def test_invalid_universe_rejected(self, client, test_user, auth_headers):
+    async def test_invalid_universe_rejected(self, client, auth_headers):
         resp = await client.post("/api/v1/auto_backtest", json={
             "prompt": "test factor",
             "universe": "invalid_universe",
         }, headers=auth_headers)
         assert resp.status_code == 422
 
-    async def test_invalid_date_format_rejected(self, client, test_user, auth_headers):
+    async def test_invalid_date_format_rejected(self, client, auth_headers):
         resp = await client.post("/api/v1/auto_backtest", json={
             "prompt": "test factor",
             "start_date": "01-01-2023",

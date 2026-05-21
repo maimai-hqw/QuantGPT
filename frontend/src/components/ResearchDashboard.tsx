@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { useColorMode } from "../contexts/ColorModeContext";
 import { authFetch } from "../api/client";
 import { getReportUrl } from "../api/client";
+import RobustnessCard from "./RobustnessCard";
 import type { Task } from "../types/backtest";
 
 interface Stats {
@@ -442,6 +443,14 @@ export default function ResearchDashboard() {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {(selectedTask.result?.scoring || selectedTask.result?.anti_overfit || selectedTask.result?.adversarial) && (
+                <RobustnessCard
+                  scoring={selectedTask.result.scoring}
+                  antiOverfit={selectedTask.result.anti_overfit}
+                  adversarial={selectedTask.result.adversarial}
+                />
               )}
 
               {selectedTask.result?.interpretation && (

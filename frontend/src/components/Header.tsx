@@ -1,8 +1,6 @@
 import { useState } from "react";
-import { BarChart3, LogOut, X, UserCircle, Terminal, Copy, Check, ExternalLink, Sun, Moon } from "lucide-react";
-import { useAuth } from "../contexts/AuthContext";
+import { BarChart3, X, Terminal, Copy, Check, ExternalLink, Sun, Moon } from "lucide-react";
 import { useColorMode } from "../contexts/ColorModeContext";
-import { useNavigate } from "react-router-dom";
 
 export const APP_VERSION = "v2.8.0";
 
@@ -345,9 +343,7 @@ function DarkModeToggle() {
 }
 
 export default function Header() {
-  const { user, isGuest, logout } = useAuth();
   const { isDark } = useColorMode();
-  const navigate = useNavigate();
   const [showChangelog, setShowChangelog] = useState(false);
   const [showMcpGuide, setShowMcpGuide] = useState(false);
 
@@ -370,51 +366,18 @@ export default function Header() {
               <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>Agent 驱动的 LLM 量化研究引擎</p>
             </div>
           </div>
-          {isGuest ? (
-            <div className="flex items-center gap-3">
-              <DarkModeToggle />
-              <ColorModeToggle />
-              <button
-                onClick={() => setShowMcpGuide(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm text-orange-600 hover:bg-orange-50 transition-colors"
-                title="MCP 集成指南"
-              >
-                <Terminal className="h-4 w-4" />
-                <span className="hidden sm:inline">MCP</span>
-              </button>
-              <span className="flex items-center gap-1.5 text-sm text-amber-600">
-                <UserCircle className="h-4 w-4" />
-                游客模式
-              </span>
-              <button
-                onClick={() => { logout(); navigate("/login"); }}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-              >
-                注册 / 登录
-              </button>
-            </div>
-          ) : user ? (
-            <div className="flex items-center gap-3">
-              <DarkModeToggle />
-              <ColorModeToggle />
-              <button
-                onClick={() => setShowMcpGuide(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm text-orange-600 hover:bg-orange-50 transition-colors"
-                title="MCP 集成指南"
-              >
-                <Terminal className="h-4 w-4" />
-                <span className="hidden sm:inline">MCP</span>
-              </button>
-              <span className={`text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>{user.email}</span>
-              <button
-                onClick={logout}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm ${isDark ? "text-gray-400 hover:text-gray-300 hover:bg-gray-800" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"} transition-colors`}
-              >
-                <LogOut className="h-4 w-4" />
-                退出
-              </button>
-            </div>
-          ) : null}
+          <div className="flex items-center gap-3">
+            <DarkModeToggle />
+            <ColorModeToggle />
+            <button
+              onClick={() => setShowMcpGuide(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm text-orange-600 hover:bg-orange-50 transition-colors"
+              title="MCP 集成指南"
+            >
+              <Terminal className="h-4 w-4" />
+              <span className="hidden sm:inline">MCP</span>
+            </button>
+          </div>
         </div>
       </header>
 

@@ -2,55 +2,12 @@ import type { BacktestRequest, Task, Session } from "../types/backtest";
 
 export const BASE = "";
 
-let _authDisabled = false;
-export function setAuthDisabled(v: boolean) { _authDisabled = v; }
-export function getAuthDisabled() { return _authDisabled; }
-
-function getAccessToken(): string | null {
-  return localStorage.getItem("quantgpt_access_token");
-}
-
-function authHeaders(): Record<string, string> {
-  if (_authDisabled) return { "Content-Type": "application/json" };
-  const token = getAccessToken();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  return headers;
-}
+export function setAuthDisabled(_v: boolean) {}
+export function getAuthDisabled() { return true; }
 
 export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const headers = { ...authHeaders(), ...options.headers };
-  const res = await fetch(url, { ...options, headers });
-
-  if (res.status === 401 && !_authDisabled) {
-    // Guest tokens don't need refresh
-    if (localStorage.getItem("quantgpt_is_guest") === "1") return res;
-
-    // Try refresh
-    const refreshTokenStr = localStorage.getItem("quantgpt_refresh_token");
-    if (refreshTokenStr) {
-      try {
-        const refreshRes = await fetch(`${BASE}/api/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshTokenStr }),
-        });
-        if (refreshRes.ok) {
-          const { access_token } = await refreshRes.json();
-          localStorage.setItem("quantgpt_access_token", access_token);
-          // Retry original request
-          const retryHeaders = { ...options.headers, "Content-Type": "application/json", Authorization: `Bearer ${access_token}` };
-          return fetch(url, { ...options, headers: retryHeaders });
-        }
-      } catch { /* fall through */ }
-    }
-    // Refresh failed, redirect to login
-    localStorage.removeItem("quantgpt_access_token");
-    localStorage.removeItem("quantgpt_refresh_token");
-    window.location.href = "/login";
-  }
-
-  return res;
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(options.headers as Record<string, string> ?? {}) };
+  return fetch(url, { ...options, headers });
 }
 
 export async function parseError(res: Response): Promise<string> {
@@ -124,26 +81,10 @@ export function streamTask(
     }, 3000);
   }
 
-  async function acquireTicket(): Promise<string | null> {
-    if (_authDisabled) return null;
-    try {
-      const res = await authFetch(`${BASE}/api/v1/tasks/${taskId}/sse-ticket`, {
-        method: "POST",
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data.ticket as string;
-    } catch {
-      return null;
-    }
-  }
-
-  async function connect() {
+  function connect() {
     if (closed) return;
 
-    const ticket = await acquireTicket();
-    const url = `${BASE}/api/v1/tasks/${taskId}/stream${ticket ? `?ticket=${ticket}` : ""}`;
-
+    const url = `${BASE}/api/v1/tasks/${taskId}/stream`;
     const es = new EventSource(url);
 
     es.addEventListener("update", (e) => {
@@ -163,15 +104,12 @@ export function streamTask(
       if (closed) return;
       retryCount++;
       if (retryCount <= MAX_RETRIES) {
-        // Retry SSE after a short delay (need new ticket each time)
         setTimeout(connect, 2000 * retryCount);
       } else {
-        // Fall back to polling
         startPolling();
       }
     });
 
-    // Store close function
     closeFn = () => { es.close(); cleanup(); };
   }
 
@@ -182,9 +120,7 @@ export function streamTask(
 }
 
 export function getReportUrl(reportUrl: string): string {
-  const token = getAccessToken();
-  const sep = reportUrl.includes("?") ? "&" : "?";
-  return `${BASE}${reportUrl}${token ? `${sep}token=${token}` : ""}`;
+  return `${BASE}${reportUrl}`;
 }
 
 export async function fetchTasks(page = 1, pageSize = 20, sessionId?: string, taskType?: string): Promise<{ tasks: Task[]; page: number; page_size: number }> {

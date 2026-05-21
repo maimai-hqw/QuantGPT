@@ -9,10 +9,6 @@ Endpoints:
     POST /api/v1/tasks/{task_id}/select_candidate — 选择迭代候选因子
     GET  /api/v1/reports/{filename}      — 下载 HTML 报告
     POST /api/v1/feedback                — 提交问题反馈
-    POST /api/v1/auth/send-code          — 发送验证码
-    POST /api/v1/auth/verify-code        — 验证码登录/注册
-    POST /api/v1/auth/refresh            — 刷新 Token
-    GET  /api/v1/auth/me                 — 当前用户信息
     GET  /api/v1/health                  — 健康检查
 
 启动: OPENAI_API_KEY=sk-xxx python -m quantgpt --transport http --port 8003
@@ -56,15 +52,14 @@ async def lifespan(app: FastAPI):
             await session.commit()
             logger.info(f"Cleaned up {result.rowcount} stale running tasks")
 
-    from .auth import _DEV_USER_ID, is_auth_disabled
-    if is_auth_disabled():
-        from .db import _get_session_factory
-        async with _get_session_factory()() as session:
-            result = await session.execute(select(User).where(User.id == _DEV_USER_ID))
-            if not result.scalar_one_or_none():
-                session.add(User(id=_DEV_USER_ID, email="dev@localhost", nickname="Dev User"))
-                await session.commit()
-        logger.info("Auth disabled — running in local development mode")
+    from .auth import _DEV_USER_ID
+    from .db import _get_session_factory
+    async with _get_session_factory()() as session:
+        result = await session.execute(select(User).where(User.id == _DEV_USER_ID))
+        if not result.scalar_one_or_none():
+            session.add(User(id=_DEV_USER_ID, email="dev@localhost", nickname="Local User"))
+            await session.commit()
+    logger.info("QuantGPT running in local mode (no auth)")
 
     from zoneinfo import ZoneInfo
 
@@ -167,7 +162,6 @@ app.add_middleware(
 
 # Register route modules
 from .routes.admin import router as admin_router
-from .routes.auth import router as auth_router
 from .routes.backtest_tasks import router as backtest_tasks_router
 from .routes.comparison import router as comparison_router
 from .routes.composite import router as composite_router
@@ -176,10 +170,11 @@ from .routes.factor_library import router as factor_library_router
 from .routes.feedback import router as feedback_router
 from .routes.iteration_routes import router as iteration_router
 from .routes.sessions import router as sessions_router
+from .routes.factor_values import router as factor_values_router
 from .routes.wq_brain import router as wq_brain_router
 from .routes.wq_brain_batch import router as wq_brain_batch_router
+from .routes.cloud_upload import router as cloud_upload_router
 
-app.include_router(auth_router)
 app.include_router(sessions_router)
 app.include_router(admin_router)
 app.include_router(factor_library_router)
@@ -189,8 +184,10 @@ app.include_router(daily_summary_router)
 app.include_router(backtest_tasks_router)
 app.include_router(iteration_router)
 app.include_router(feedback_router)
+app.include_router(factor_values_router)
 app.include_router(wq_brain_router)
 app.include_router(wq_brain_batch_router)
+app.include_router(cloud_upload_router)
 
 
 # ---- robots.txt ----

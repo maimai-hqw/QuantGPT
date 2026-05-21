@@ -66,6 +66,7 @@ export interface IterationCandidate {
   };
   report_metrics: BacktestMetrics;
   report_url: string;
+  cloud_validation?: import("../api/cloud").CloudValidationResult | null;
   status: "success" | "failed";
   error?: string;
 }
@@ -127,10 +128,36 @@ export interface WQBrain {
   wq_is_tests: Record<string, WQISTest>;
 }
 
+export interface RobustnessTest {
+  name: string;
+  passed: boolean;
+  details: Record<string, unknown>;
+}
+
+export interface RobustnessResult {
+  score: number;
+  recommendation: string;
+  passed_count: number;
+  total_count: number;
+  tests: RobustnessTest[];
+}
+
+export interface ScoringResult {
+  score: number;
+  grade: "A" | "B" | "C" | "D";
+  component_scores: Record<string, number>;
+  cloud_predicted_pass?: boolean;
+  capped?: boolean;
+  cap_reason?: string;
+}
+
 export interface BacktestResult {
   report_url: string;
   metrics: BacktestMetrics;
   wq_brain?: WQBrain;
+  anti_overfit?: RobustnessResult | null;
+  adversarial?: RobustnessResult | null;
+  scoring?: ScoringResult | null;
   backtest_summary: {
     long_short_sharpe: number;
     long_short_annual?: number;
@@ -160,6 +187,7 @@ export interface BacktestResult {
     generated_expression: string;
   };
   interpretation?: FactorInterpretation;
+  cloud_validation?: import("../api/cloud").CloudValidationResult | null;
   stock_factor_data?: StockFactorData | null;
   nav_series?: { date: string; value: number }[];
 }

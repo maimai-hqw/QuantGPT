@@ -1,160 +1,46 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext } from "react";
 import type { ReactNode } from "react";
-import type { User } from "../types/auth";
-import { getMe, refreshToken } from "../api/auth";
-import { setAuthDisabled } from "../api/client";
 
 interface AuthContextType {
-  user: User | null;
+  user: { id: string; email: string; nickname: string };
   isAuthenticated: boolean;
   isGuest: boolean;
   isLoading: boolean;
   accessToken: string | null;
   showSetPassword: boolean;
   setShowSetPassword: (v: boolean) => void;
-  login: (accessToken: string, refreshToken: string, user: User) => void;
+  login: () => void;
   logout: () => void;
   enterGuestMode: () => void;
-  updateUser: (u: Partial<User>) => void;
+  updateUser: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const _user = { id: "dev", email: "dev@localhost", nickname: "Local User" };
 
-const TOKEN_KEY = "quantgpt_access_token";
-const REFRESH_KEY = "quantgpt_refresh_token";
-const GUEST_FLAG_KEY = "quantgpt_is_guest";
+const defaultCtx: AuthContextType = {
+  user: _user,
+  isAuthenticated: true,
+  isGuest: false,
+  isLoading: false,
+  accessToken: null,
+  showSetPassword: false,
+  setShowSetPassword: () => {},
+  login: () => {},
+  logout: () => {},
+  enterGuestMode: () => {},
+  updateUser: () => {},
+};
+
+const AuthContext = createContext<AuthContextType>(defaultCtx);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isGuest, setIsGuest] = useState(false);
-  const [showSetPassword, setShowSetPassword] = useState(false);
-  const [authDisabledFlag, setAuthDisabledFlag] = useState(false);
-
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
-    localStorage.removeItem(GUEST_FLAG_KEY);
-    setAccessToken(null);
-    setUser(null);
-    setIsGuest(false);
-    setShowSetPassword(false);
-  }, []);
-
-  const login = useCallback((access: string, refresh: string, u: User) => {
-    localStorage.setItem(TOKEN_KEY, access);
-    localStorage.setItem(REFRESH_KEY, refresh);
-    localStorage.removeItem(GUEST_FLAG_KEY);
-    setAccessToken(access);
-    setUser(u);
-    setIsGuest(false);
-    if (!u.has_password) {
-      setShowSetPassword(true);
-    }
-  }, []);
-
-  const enterGuestMode = useCallback(async () => {
-    try {
-      const res = await fetch("/api/v1/auth/guest-token", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to get guest token");
-      const { access_token } = await res.json();
-      localStorage.setItem(TOKEN_KEY, access_token);
-      localStorage.removeItem(REFRESH_KEY);
-      localStorage.setItem(GUEST_FLAG_KEY, "1");
-      setAccessToken(access_token);
-      setUser(null);
-      setIsGuest(true);
-    } catch {
-      localStorage.removeItem(TOKEN_KEY);
-    }
-  }, []);
-
-  const updateUser = useCallback((partial: Partial<User>) => {
-    setUser((prev) => (prev ? { ...prev, ...partial } : prev));
-  }, []);
-
-  // On mount: check if backend has auth disabled
-  useEffect(() => {
-    fetch("/api/v1/health")
-      .then(res => res.json())
-      .then(data => {
-        if (data.auth_disabled) {
-          setAuthDisabled(true);
-          setAuthDisabledFlag(true);
-          setUser({ id: "dev", email: "dev@localhost", nickname: "Dev User", has_password: false, created_at: new Date().toISOString() });
-          setIsLoading(false);
-        }
-      })
-      .catch(() => { /* backend unreachable, proceed with normal auth */ });
-  }, []);
-
-  // On mount: check stored token (skip if auth disabled)
-  useEffect(() => {
-    if (authDisabledFlag) return;
-
-    const stored = localStorage.getItem(TOKEN_KEY);
-    const storedRefresh = localStorage.getItem(REFRESH_KEY);
-    if (!stored) {
-      setIsLoading(false);
-      return;
-    }
-
-    // Restore guest mode
-    if (localStorage.getItem(GUEST_FLAG_KEY) === "1") {
-      setAccessToken(stored);
-      setIsGuest(true);
-      setIsLoading(false);
-      return;
-    }
-
-    getMe(stored)
-      .then((u) => {
-        setAccessToken(stored);
-        setUser(u);
-      })
-      .catch(async () => {
-        // Try refresh
-        if (storedRefresh) {
-          try {
-            const { access_token } = await refreshToken(storedRefresh);
-            localStorage.setItem(TOKEN_KEY, access_token);
-            const u = await getMe(access_token);
-            setAccessToken(access_token);
-            setUser(u);
-          } catch {
-            logout();
-          }
-        } else {
-          logout();
-        }
-      })
-      .finally(() => setIsLoading(false));
-  }, [logout, authDisabledFlag]);
-
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user || isGuest,
-        isGuest,
-        isLoading,
-        accessToken,
-        showSetPassword,
-        setShowSetPassword,
-        login,
-        logout,
-        enterGuestMode,
-        updateUser,
-      }}
-    >
+    <AuthContext.Provider value={defaultCtx}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export function useAuth(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+  return useContext(AuthContext);
 }

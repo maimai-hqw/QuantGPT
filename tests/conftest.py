@@ -8,13 +8,9 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-os.environ["AUTH_DISABLED"] = "false"
 os.environ["QUANTGPT_TASK_BACKEND"] = "thread"
-os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-ci-only-do-not-use-in-production")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite://")
-os.environ.setdefault("QUANTGPT_ADMIN_PASSWORD", "test-admin-pw")
 
-from quantgpt.auth import create_access_token, hash_password
 from quantgpt.backtest import api_context
 from quantgpt.models import Base, User
 
@@ -43,7 +39,6 @@ async def db_session(engine):
 
 @pytest_asyncio.fixture
 async def client(engine):
-    """AsyncClient wired to the FastAPI app with an in-memory SQLite DB."""
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     from quantgpt.api_server import app
@@ -67,11 +62,9 @@ async def client(engine):
 
 @pytest_asyncio.fixture
 async def test_user(db_session: AsyncSession) -> User:
-    """Create a test user in the DB and return it."""
     user = User(
         id=uuid.uuid4(),
         email="test@example.com",
-        password_hash=hash_password("test123456"),
         is_active=True,
     )
     db_session.add(user)
@@ -81,7 +74,5 @@ async def test_user(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture
-def auth_headers(test_user: User) -> dict[str, str]:
-    """Authorization headers with a valid access token for test_user."""
-    token = create_access_token(test_user.id, test_user.email)
-    return {"Authorization": f"Bearer {token}"}
+def auth_headers() -> dict[str, str]:
+    return {"Content-Type": "application/json"}

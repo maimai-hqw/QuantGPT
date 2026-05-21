@@ -14,13 +14,7 @@ class TestComputeFactorScore:
             "long_short_sharpe": 1.0,
             "monotonicity_score": 0.7,
             "spread": 0.05,
-            "wq_fitness": 0.0,
-            "wq_brain": {
-                "wq_sharpe": 0.5,
-                "wq_fitness": 0.3,
-                "wq_turnover": 0.15,
-                "wq_is_tests": {},
-            },
+            "turnover": 0.15,
         }
         d.update(overrides)
         return d
@@ -37,7 +31,7 @@ class TestComputeFactorScore:
         assert "component_scores" in result
         assert set(result["component_scores"].keys()) == {
             "ic_mean", "ic_ir", "stability", "anti_overfit", "group_backtest",
-            "wq_alignment",
+            "cloud_alignment",
         }
 
     def test_score_in_range(self):
@@ -48,9 +42,9 @@ class TestComputeFactorScore:
         summary = self._base_summary(
             ic_mean=0.08, ic_ir=1.5, ic_win_rate=0.75,
             long_short_sharpe=2.0, monotonicity_score=1.0, spread=0.10,
-            wq_brain={"wq_sharpe": 1.8, "wq_fitness": 1.5, "wq_turnover": 0.3, "wq_is_tests": {}},
+            turnover=0.05,
         )
-        result = compute_factor_score(summary, self._base_report(), anti_overfit_score=90)
+        result = compute_factor_score(summary, self._base_report(), anti_overfit_score=90, data_days=200)
         assert result["score"] >= 80
         assert result["grade"] == "A"
 
@@ -99,6 +93,30 @@ class TestComputeFactorScore:
         )
         result = compute_factor_score(summary, self._base_report(cagr=0, sharpe=0))
         assert result["score"] >= 0
+
+    def test_cloud_alignment_with_good_data(self):
+        summary = self._base_summary(ic_mean=0.03, ic_ir=0.5, turnover=0.10)
+        result = compute_factor_score(summary, self._base_report(), data_days=200)
+        cloud = result["component_scores"]["cloud_alignment"]
+        assert cloud > 50
+
+    def test_cloud_alignment_without_data_days(self):
+        summary = self._base_summary(ic_mean=0.03, ic_ir=0.5, turnover=0.10)
+        result = compute_factor_score(summary, self._base_report(), data_days=None)
+        cloud = result["component_scores"]["cloud_alignment"]
+        assert cloud >= 0
+
+    def test_cloud_predicted_pass(self):
+        summary = self._base_summary(ic_mean=0.03, ic_ir=0.3, turnover=0.10)
+        result = compute_factor_score(summary, self._base_report(), data_days=200)
+        assert "cloud_predicted_pass" in result
+
+    def test_high_turnover_penalizes_cloud_alignment(self):
+        low_to = self._base_summary(turnover=0.05)
+        high_to = self._base_summary(turnover=0.50)
+        r_low = compute_factor_score(low_to, self._base_report(), data_days=200)
+        r_high = compute_factor_score(high_to, self._base_report(), data_days=200)
+        assert r_low["component_scores"]["cloud_alignment"] > r_high["component_scores"]["cloud_alignment"]
 
 
 class TestIsDuplicateExpression:
