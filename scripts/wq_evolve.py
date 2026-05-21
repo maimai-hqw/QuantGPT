@@ -93,6 +93,7 @@ EXISTING_ALPHAS = [
     "rank(vwap/close - 1) + 0.3 * rank(-cap/sales)",  # 6XRdV1qP ACTIVE (decay=10) F=1.10 SR=1.86 - vwap-close microstructure family
     "zscore(ts_delta(adv20,60)/adv20)+0.35*zscore(ts_corr(returns,volume,40))+0.25*zscore(sales/cap)",  # wp5ol2VQ ACTIVE (decay=10) F=1.17 SR=1.35 turn=9.7% - liquidity momentum family
     "scale(-zscore(ts_std_dev(log(volume/adv20),60))+0.4*zscore(sales/cap))",  # 3qE5PPeN ACTIVE (decay=5) F=1.37 SR=1.34 turn=6.0% - log-volume variance / low-attention long family
+    "-scale(group_zscore(ts_decay_linear(signed_power(log(volume/adv20)-ts_mean(log(volume/adv20),20),3),10),subindustry))+0.35*zscore(sales/cap)",  # np3pnlex ACTIVE F=1.64 SR=1.37 turn=2.3% - log-volume centered 3rd moment (subindustry) / event-driven skew family
     # Daily intraday OHLC mean-revert family — SC=0.80-0.96 撞 6XRdV1qP (2026-05-18/19 实测，整族标定)
     "rank(-(close - open)/close) + 0.3 * rank(-cap/sales)",  # kqngxNak F=1.39 SR=2.04 SC=0.86 (close-open intraday rev)
     "rank(-returns * volume / adv20) + 0.3*rank(-cap/sales)",  # omnE9R8b F=1.31 SR=1.95 SC=0.83 (vol-weighted returns rev)
