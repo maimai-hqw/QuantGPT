@@ -316,43 +316,66 @@ def run_list_alphas(
     min_fitness: float | None = None,
     status_filter: str | None = None,
 ) -> dict:
-    """List alphas from the platform with optional filtering."""
+    """List alphas from the platform with optional filtering.
+
+    When status_filter or min_fitness is set, auto-paginates through ALL alphas
+    (WQ API caps each page at 100; older ACTIVE alphas would otherwise be missed
+    when user has 100+ simulated alphas in the account).
+    """
     s = client._get_session()
-    r = s.get(
-        "https://api.worldquantbrain.com/users/self/alphas",
-        params={"limit": min(limit, 100), "offset": offset, "order": "-dateCreated"},
-    )
-    if r.status_code != 200:
-        return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:300]}"}
+    url = "https://api.worldquantbrain.com/users/self/alphas"
 
-    data = r.json()
-    raw_alphas = data if isinstance(data, list) else data.get("results", [])
+    # When filtering, we must paginate through all pages to find matching alphas
+    # anywhere in history; otherwise older matches get masked by newer non-matches.
+    has_filter = (status_filter is not None) or (min_fitness is not None)
+    page_size = 100
+    max_pages = 50  # safety cap: 5000 alphas total
+    cur_offset = offset
+    alphas: list[dict] = []
 
-    alphas = []
-    for a in raw_alphas:
-        code = a.get("regular", {})
-        expr = code.get("code", "") if isinstance(code, dict) else str(code)
-        settings = a.get("settings", {})
-        is_data = a.get("is", {})
-        fitness = safe_float(is_data.get("fitness"))
-        alpha_status = a.get("status", "")
+    while True:
+        r = s.get(url, params={"limit": page_size, "offset": cur_offset, "order": "-dateCreated"})
+        if r.status_code != 200:
+            return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:300]}"}
 
-        if min_fitness is not None and (fitness is None or fitness < min_fitness):
-            continue
-        if status_filter and alpha_status.upper() != status_filter.upper():
-            continue
+        data = r.json()
+        raw_alphas = data if isinstance(data, list) else data.get("results", [])
+        if not raw_alphas:
+            break
 
-        alphas.append({
-            "alpha_id": a.get("id"),
-            "expression": expr,
-            "status": alpha_status,
-            "dateCreated": a.get("dateCreated"),
-            "neutralization": settings.get("neutralization"),
-            "sharpe": safe_float(is_data.get("sharpe")),
-            "fitness": fitness,
-            "returns": safe_float(is_data.get("returns")),
-            "turnover": safe_float(is_data.get("turnover")),
-        })
+        for a in raw_alphas:
+            code = a.get("regular", {})
+            expr = code.get("code", "") if isinstance(code, dict) else str(code)
+            settings = a.get("settings", {})
+            is_data = a.get("is", {})
+            fitness = safe_float(is_data.get("fitness"))
+            alpha_status = a.get("status", "")
+
+            if min_fitness is not None and (fitness is None or fitness < min_fitness):
+                continue
+            if status_filter and alpha_status.upper() != status_filter.upper():
+                continue
+
+            alphas.append({
+                "alpha_id": a.get("id"),
+                "expression": expr,
+                "status": alpha_status,
+                "dateCreated": a.get("dateCreated"),
+                "neutralization": settings.get("neutralization"),
+                "sharpe": safe_float(is_data.get("sharpe")),
+                "fitness": fitness,
+                "returns": safe_float(is_data.get("returns")),
+                "turnover": safe_float(is_data.get("turnover")),
+            })
+
+            if len(alphas) >= limit:
+                return {"ok": True, "total": len(alphas), "alphas": alphas}
+
+        if not has_filter or len(raw_alphas) < page_size:
+            break
+        cur_offset += page_size
+        if (cur_offset - offset) // page_size >= max_pages:
+            break
 
     return {"ok": True, "total": len(alphas), "alphas": alphas}
 
